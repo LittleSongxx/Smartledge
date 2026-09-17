@@ -1,0 +1,4 @@
+org.springframework.boot.env.EnvironmentPostProcessor=\
+  org.smartledge.environment.SpringEnvironment
+org.springframework.context.ApplicationContextInitializer=\
+  org.smartledge.core.SpringUtil

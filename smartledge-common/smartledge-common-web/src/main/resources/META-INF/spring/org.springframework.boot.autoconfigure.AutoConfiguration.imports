@@ -1,0 +1,2 @@
+org.smartledge.config.SuperAgentCommonAutoConfig
+org.smartledge.database.mybatisplus.MybatisPlusAutoConfiguration

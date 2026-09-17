@@ -1,0 +1,38 @@
+package org.smartledge.enums;
+
+/**
+ * @description: 枚举定义
+ * @author: Song
+ **/
+
+public enum DocumentChunkSourceTypeEnum {
+    ORIGINAL(1, "原文切块"),
+    ENRICHED(2, "后处理补全文本"),
+    GRAPH_RAG(3, "GraphRAG 派生证据");
+
+    private final Integer code;
+
+    private final String msg;
+
+    DocumentChunkSourceTypeEnum(Integer code, String msg) {
+        this.code = code;
+        this.msg = msg;
+    }
+
+    public Integer getCode() {
+        return code;
+    }
+
+    public String getMsg() {
+        return msg == null ? "" : msg;
+    }
+
+    public static DocumentChunkSourceTypeEnum getRc(Integer code) {
+        for (DocumentChunkSourceTypeEnum item : DocumentChunkSourceTypeEnum.values()) {
+            if (item.code.intValue() == code.intValue()) {
+                return item;
+            }
+        }
+        return null;
+    }
+}
