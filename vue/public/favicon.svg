@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- 背景圆形 -->
+  <circle cx="16" cy="16" r="16" fill="#4A90E2"/>
+  
+  <!-- AI 文字 -->
+  <text x="16" y="22" font-family="Arial" font-size="16" font-weight="bold" fill="white" text-anchor="middle">AI</text>
+  
+  <!-- 装饰性元素 -->
+  <path d="M8 16 L12 12 L16 16 L12 20 Z" fill="white" opacity="0.3"/>
+  <path d="M16 16 L20 12 L24 16 L20 20 Z" fill="white" opacity="0.3"/>
+</svg> 

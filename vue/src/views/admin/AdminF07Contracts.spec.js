@@ -1,0 +1,180 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { describe, expect, it } from 'vitest'
+
+function source(path) {
+  return readFileSync(resolve(process.cwd(), path), 'utf8')
+}
+
+const routeTrace = 'src/views/admin/AdminKnowledgeRouteTraceView.vue'
+const sessionList = 'src/views/admin/AdminObservabilityListView.vue'
+const sessionDetail = 'src/views/admin/AdminObservabilitySessionView.vue'
+const exchangeDetail = 'src/views/admin/AdminObservabilityDetailView.vue'
+const artifactExplorer = 'src/components/admin/RagArtifactExplorer.vue'
+const parseWorkbench = 'src/components/admin/RagParseWorkbench.vue'
+
+describe('F07 observation and RAG high-density contracts', () => {
+  it('keeps route traces server-paged and mobile as a single list/detail panel', () => {
+    const content = source(routeTrace)
+    expect(content).toContain('queryKnowledgeRouteTracePage')
+    expect(content).toContain('workspacePane')
+    expect(content).toContain('server-paged')
+    expect(content).not.toMatch(/<Button[^>]*rounded-full/)
+    expect(content).not.toContain('lowConfidenceWidened')
+    expect(content).not.toContain('confidenceBand')
+    expect(content).not.toContain('低置信时会放宽')
+    expect(content).not.toContain('基于文档画像与元数据综合召回')
+    expect(content).not.toContain('bg-gradient-to')
+  })
+
+  it('uses centered child-page dialogs for stage and candidate evidence details', () => {
+    const content = source(exchangeDetail)
+    expect(content).toContain("import ChildPageDialog from '@/components/system/ChildPageDialog.vue'")
+    expect(content).toContain('<ChildPageDialog')
+    expect(content).not.toMatch(/fixed inset-0[^\n]*z-50/) 
+    expect(content).not.toContain('useBodyScrollLock')
+    expect(content).not.toMatch(/<Sheet|SheetContent|slide-in-from-right|translate-x-full/)
+  })
+
+  it('keeps execution stages visually grouped while only explicit buttons open details', () => {
+    const content = source(exchangeDetail)
+    expect(content).toContain('data-stage-trace-row')
+    expect(content).toContain('data-stage-trace-panel')
+    expect(content).toContain('bg-secondary/40')
+    expect(content).toContain('hover:bg-foreground/[0.08]')
+    expect(content).toContain('查看阶段详情')
+    expect(content).toContain('@click="openTraceDetail(trace)"')
+    expect(content).not.toContain('@click="openTraceDetail(trace.stageId)"')
+    expect(content).not.toContain('selectedTraceStageId')
+  })
+
+  it('renders key results as one diagnostic signal map instead of a card grid', () => {
+    const content = source(exchangeDetail)
+    expect(content).toContain('data-answer-signal-map')
+    expect(content).toContain('data-signal-input')
+    expect(content).toContain('data-signal-evidence')
+    expect(content).toContain('data-signal-answer')
+    expect(content).toContain('data-signal-resource-rail')
+    expect(content).toContain('data-signal-node-panel')
+    expect(content).toContain('data-signal-resource-link')
+    expect(content).toContain('signal-flow-path')
+    expect(content).toContain('data-signal-flow-link')
+    expect(content).toContain('v-for="link in orderedSignalFlowLinks"')
+    expect(content).toContain('Number(signalFlowLinkActive(left)) - Number(signalFlowLinkActive(right))')
+    expect(content).toContain('marker-end')
+    expect(content).toContain('signal-flow-arrow-active')
+    expect(content).toContain('id="signal-flow-arrow" markerHeight="10" markerWidth="10"')
+    expect(content).toContain('id="signal-flow-arrow-active" markerHeight="13" markerWidth="13"')
+    expect(content).toContain("signalPathActive('answer', 'resources') ? 'size-6' : 'size-5'")
+    expect(content).toContain('signal-node-panel')
+    expect(content).toContain('scale(1.015)')
+    expect(content).toContain('查看过程')
+    expect(content).not.toContain('data-key-results-grid')
+    expect(content).not.toContain('data-key-result-card')
+    expect(content).not.toContain('class="signal-flow-path signal-flow-arrow')
+    expect(content).not.toMatch(/<article[^>]*@click=/)
+    expect(content.indexOf('data-answer-signal-map')).toBeLessThan(content.indexOf('data-stage-trace-row'))
+  })
+
+  it('renders retrieval fusion as a bounded flow workbench with button-only details', () => {
+    const content = source(exchangeDetail)
+    expect(content).toContain('data-retrieval-fusion-workbench')
+    expect(content).toContain('data-retrieval-flow-summary')
+    expect(content).toContain('data-retrieval-channel-lane')
+    expect(content).toContain('data-fusion-candidate-map')
+    expect(content).toContain('data-fusion-outcome-group')
+    expect(content).toContain('data-fusion-candidate-row')
+    expect(content).toContain('data-fusion-candidate-track')
+    expect(content).toContain('data-fusion-stage')
+    expect(content).toContain('data-fusion-stage-arrow')
+    expect(content).toContain('buildFusionCandidateFlow')
+    expect(content).toContain('查看详情')
+    expect(content).toContain('@click="openCandidateDetail(candidate.row)"')
+    expect(content).toContain('fusion-candidate-track-row')
+    expect(content).toContain('fusion-candidate-layer-card--kind')
+    expect(content).toContain('fusion-candidate-layer-card--content')
+    expect(content).toContain('fusion-candidate-layer-card--source')
+    expect(content).toContain('width: fit-content')
+    expect(content).toContain('--fusion-content-chip-bg: var(--route-mode-auto-bg)')
+    expect(content).toContain('--fusion-outcome-bg: var(--selection-bg)')
+    expect(content).toContain('--fusion-outcome-border: var(--selection-fg)')
+    expect(content).toContain('--fusion-outcome-fg: var(--selection-fg)')
+    expect(content).toContain("data-content-kind='正文预览'")
+    expect(content).toContain("data-content-kind='内容状态'")
+    expect(content).toContain('background: var(--secondary)')
+    expect(content).not.toContain('通道执行对比')
+    expect(content).not.toContain('融合候选结果')
+    expect(content).not.toContain('候选排名汇流图')
+    expect(content).not.toContain('data-fusion-candidate-inspector')
+    expect(content).not.toContain('fusion-candidate-line')
+    expect(content).not.toContain('fusion-candidate-foreign')
+    expect(content).not.toContain('inspectedFusionCandidate')
+    expect(content).not.toContain('hoverFusionCandidate')
+    expect(content).not.toContain('fusion-candidate-hit')
+    expect(content).not.toContain('fusion-outcome-header')
+    expect(content).not.toContain('fusion-outcome-mark')
+    expect(content).not.toContain('grid-template-columns:repeat(auto-fit,minmax(260px,1fr))')
+    expect(content).not.toMatch(/<article[^>]*data-fusion-candidate-row[^>]*@click=/s)
+  })
+
+  it('segments long sessions and carries list/page context through exchange navigation', () => {
+    const list = source(sessionList)
+    const session = source(sessionDetail)
+    const exchange = source(exchangeDetail)
+    expect(session).toContain('pagedAssistantExchanges')
+    expect(session).toContain('EXCHANGE_PAGE_SIZE')
+    expect(list).toContain('listNavigationQuery')
+    expect(session).toContain('observationListQuery')
+    expect(exchange).toContain('sessionReturnTarget')
+  })
+
+  it('keeps RAG artifact browsing paged, on-demand, and mobile-width safe', () => {
+    const content = source(artifactExplorer)
+    expect(content).toContain('queryDocumentRagArtifactNodes')
+    expect(content).toContain('queryDocumentRagArtifactNodeDetail')
+    expect(content).toContain('queryDocumentRagArtifactRelations')
+    expect(content).toContain('queryDocumentRagArtifactTableWindow')
+    expect(content).toContain('pageSize: NODE_PAGE_SIZE')
+    expect(content).toContain('pageSize: RELATION_PAGE_SIZE')
+    expect(content).toContain("loadBundle('INCOMING', 'OUTGOING')")
+    expect(content).toContain("loadRelationPage('INCOMING', page)")
+    expect(content).toContain("loadRelationPage('OUTGOING', page)")
+    expect(content).toContain('rootOnly: true')
+    expect(content).toContain('parentNodeId: parentId')
+    expect(content).toContain('hidden overflow-x-auto pb-1 xl:block')
+    expect(content).toContain('grid gap-3 p-4 xl:hidden')
+    expect(content).toContain('<ChildPageDialog')
+    expect(content).toContain('@media (prefers-reduced-motion: reduce)')
+    expect(content).not.toMatch(/<button\b/)
+  })
+
+  it('keeps parser artifacts and overlay pages independently loadable', () => {
+    const content = source(parseWorkbench)
+    expect(content).toContain('Promise.allSettled')
+    expect(content).toContain('queryParseArtifactContent')
+    expect(content).toContain('overlayDetailRequestToken')
+    expect(content).toContain("label: '诊断不可用'")
+    expect(content).toContain("label: '当前无观测数据'")
+    expect(content).toContain("label: '观测不完整'")
+    expect(content).not.toContain('可用于索引')
+    expect(content).not.toMatch(/<Sheet|SheetContent|slide-in-from-right|translate-x-full/)
+  })
+
+  it('assigns RAG learning content to one parse-workbench view at a time', () => {
+    const workbench = source(parseWorkbench)
+    const detail = source('src/views/admin/AdminDocumentDetailView.vue')
+
+    expect(workbench).toContain("emit('update:activeView', value)")
+    expect(workbench).toContain('name="artifacts"')
+    expect(detail).toContain('v-model:active-view="ragParseWorkbenchView"')
+    expect(detail).toContain('<template #artifacts="{ artifacts, loading: rawLoading, error: rawError, reload }">')
+    expect((detail.match(/<RagArtifactExplorer\b/g) || [])).toHaveLength(1)
+    // 分层摘要质量评测 now lives inside the workbench diagnostic tab as a sibling of
+    // 内容提取/空间结构/处理性能 (passed down via prop), not gated in the parent.
+    expect(detail).toContain(':raptor-quality="raptorQualityReport"')
+    expect(workbench).toContain('v-if="props.raptorQuality"')
+    expect(workbench).toContain('value="raptor"')
+    expect(detail).toContain('v-if="ragParseWorkbenchView === \'overview\'"')
+    expect(detail).not.toContain('v-if="ragParseWorkbenchView === \'artifacts\'"')
+  })
+})
