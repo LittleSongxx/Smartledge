@@ -9,8 +9,11 @@ Type=simple
 # 必须从仓库根目录启动：application.yaml 通过 spring.config.import 读根目录 .env
 WorkingDirectory=/srv/smartledge/app
 EnvironmentFile=-/srv/smartledge/app/.env
-Environment=JAVA_OPTS=-Xms768m -Xmx1536m -XX:MaxMetaspaceSize=320m -XX:+UseG1GC -Dfile.encoding=UTF-8
-ExecStart=/usr/bin/java $JAVA_OPTS -jar /srv/smartledge/release/smartledge-business-chat.jar
+Environment="JAVA_OPTS=-Xms512m -Xmx1024m -XX:MaxMetaspaceSize=256m -XX:+UseG1GC -Dfile.encoding=UTF-8"
+# systemd 不会展开未加引号的 Environment= 多段 JVM 参数，必须走 shell。
+# ES 在开机后要几十秒才接受连接；不等待会让 documentElasticsearchIndexInitializer 直接把进程拉死。
+ExecStartPre=/bin/bash -c 'for i in $(seq 1 45); do curl -sf http://127.0.0.1:9201 >/dev/null && exit 0; sleep 2; done; echo elasticsearch-not-ready >&2; exit 1'
+ExecStart=/bin/bash -c 'exec /usr/bin/java $JAVA_OPTS -jar /srv/smartledge/release/smartledge-business-chat.jar'
 Restart=always
 RestartSec=10
 SuccessExitStatus=143

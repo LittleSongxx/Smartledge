@@ -28,6 +28,8 @@ public class SuperAgentChatDialogue extends BaseTableData {
     @TableField("dialogue_code")
     private String conversationId;
 
+    private Long tenantId;
+
     /** 归属用户 id；0 表示无归属（B3 之前的历史会话），按不可访问处理。 */
     private Long userId;
 

@@ -27,8 +27,8 @@ describe('F05 admin shell contracts', () => {
     const login = source('src/views/AdminLoginView.vue')
     expect(login).toContain('showPassword')
     expect(login).toContain(':loading="submitting"')
-    expect(login).toContain("username: 'admin'")
-    expect(login).toContain("password: 'admin123456'")
+    expect(login).toContain('PORTFOLIO_TRIAL.admin.username')
+    expect(login).toContain('PORTFOLIO_TRIAL.admin.password')
   })
 })
 

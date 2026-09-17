@@ -1180,11 +1180,11 @@ public class DocumentStrategyServiceImpl implements DocumentStrategyService {
             Set<String> sentenceTokenSet = extractTokens(sentence);
 
             boolean exceedMaxChars = currentChunk.length() + sentence.length() > semanticMaxChars;
-            double similarity = currentTokenSet.isEmpty() ? 1D : jaccard(currentTokenSet, sentenceTokenSet);
-            boolean semanticBreak = currentChunk.length() >= semanticMinChars
+            double similarity = currentTokenSet.isEmpty() ? 1D : lexicalSimilarity(currentTokenSet, sentenceTokenSet);
+            boolean lexicalBreak = currentChunk.length() >= semanticMinChars
                 && similarity < similarityThreshold;
 
-            if (currentChunk.length() > 0 && (exceedMaxChars || semanticBreak)) {
+            if (currentChunk.length() > 0 && (exceedMaxChars || lexicalBreak)) {
 
                 resultList.add(cloneChunkCandidate(candidate, currentChunk.toString().trim()));
                 currentChunk.setLength(0);
@@ -1398,7 +1398,8 @@ public class DocumentStrategyServiceImpl implements DocumentStrategyService {
         return tokenSet;
     }
 
-    private double jaccard(Set<String> left, Set<String> right) {
+    /** Lexical token overlap. This is not embedding semantic chunking. */
+    private double lexicalSimilarity(Set<String> left, Set<String> right) {
         if (left.isEmpty() || right.isEmpty()) {
             return 0D;
         }

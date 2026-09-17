@@ -27,9 +27,9 @@ vi.mock('vue-router', async () => {
 
 vi.mock('../../api/api', () => ({
   APIError: class APIError extends Error {},
-  chatApi: {
-    getSession: mocks.getSession,
-    rebuildConversationSummary: mocks.rebuildSummary
+  manageApi: {
+    getObservabilitySession: mocks.getSession,
+    rebuildObservabilityConversationSummary: mocks.rebuildSummary
   }
 }))
 

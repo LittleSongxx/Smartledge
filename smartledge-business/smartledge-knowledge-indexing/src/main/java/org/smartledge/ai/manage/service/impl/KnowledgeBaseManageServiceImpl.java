@@ -230,7 +230,8 @@ public class KnowledgeBaseManageServiceImpl implements KnowledgeBaseManageServic
             String.valueOf(nullToZero(entity.getIsDefault())),
             String.valueOf(nullToZero(entity.getSortOrder())),
             String.valueOf(documentCounts.getOrDefault(entity.getId(), 0L)),
-            String.valueOf(retrievableCounts.getOrDefault(entity.getId(), 0L))
+            String.valueOf(retrievableCounts.getOrDefault(entity.getId(), 0L)),
+            entity.getEditTime() == null ? "" : String.valueOf(entity.getEditTime().getTime())
         );
     }
 

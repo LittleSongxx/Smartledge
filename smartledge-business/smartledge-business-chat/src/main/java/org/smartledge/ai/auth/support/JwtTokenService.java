@@ -4,28 +4,27 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.SignatureAlgorithm;
+import io.jsonwebtoken.security.Keys;
 import org.smartledge.ai.auth.config.AdminAuthProperties;
 import org.smartledge.exception.SuperAgentFrameException;
 import org.springframework.stereotype.Component;
 
+import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.Date;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 /**
- * 登录 token 的签发与解析（HS256，密钥来自系统配置 {@code adminAuth.tokenSecret}）。
+ * 登录 token 的签发与解析（HS256，密钥来自本地/环境配置 {@code app.admin-auth.token-secret}）。
  *
- * <p>token 携带的身份是**登录时刻的快照**：{@code sub}(登录名)、{@code uid}(用户 id)、
- * {@code tid}(租户 id)、{@code aud}(用途)、{@code roles}(角色 id)、{@code perms}(权限编码)。
- * 这样每个请求都不需要回查用户/角色/权限表，代价是改权限要重新登录才生效 ——
- * 这是刻意的取舍：权限判定不能依赖"每次请求都查库成功"，否则数据库抖动会变成放行。</p>
- *
- * <p>角色的载荷是**角色 id** 而不是编码：文档 ACL 的主体是 {@code principal_id}（角色 id），
- * 用编码会让每次 ACL 解析都要多做一次编码到 id 的映射，而映射失配的后果是静默少授权。</p>
+ * <p>token 携带登录时刻的身份快照，并带 {@code ver}（token 版本）与 {@code jti}。
+ * 过滤器在验签之后还会回查账号/租户启用状态与版本，因此停用、改角色或登出后旧 token 立即失效。</p>
  */
 @Component
 public class JwtTokenService {
@@ -38,6 +37,8 @@ public class JwtTokenService {
 
     public static final String CLAIM_PERMISSIONS = "perms";
 
+    public static final String CLAIM_TOKEN_VERSION = "ver";
+
     private final AdminAuthProperties adminAuthProperties;
 
     public JwtTokenService(AdminAuthProperties adminAuthProperties) {
@@ -48,19 +49,21 @@ public class JwtTokenService {
     public String generateToken(AuthenticatedPrincipal principal) {
         Instant now = Instant.now();
         Instant expireAt = now.plusSeconds(adminAuthProperties.getTokenExpireMinutes() * 60);
+        String jti = principal.jti() == null || principal.jti().isBlank()
+            ? UUID.randomUUID().toString()
+            : principal.jti();
         return Jwts.builder()
-            .setSubject(principal.username())
+            .id(jti)
+            .subject(principal.username())
             .claim(CLAIM_USER_ID, principal.userId())
             .claim(CLAIM_TENANT_ID, principal.tenantId())
             .claim(CLAIM_ROLES, List.copyOf(principal.roleIds()))
             .claim(CLAIM_PERMISSIONS, List.copyOf(principal.permissions()))
-            .setAudience(principal.audience().claimValue())
-            .setIssuedAt(Date.from(now))
-            .setExpiration(Date.from(expireAt))
-            .signWith(
-                SignatureAlgorithm.HS256,
-                adminAuthProperties.getTokenSecret().getBytes(StandardCharsets.UTF_8)
-            )
+            .claim(CLAIM_TOKEN_VERSION, principal.tokenVersion())
+            .audience().add(principal.audience().claimValue()).and()
+            .issuedAt(Date.from(now))
+            .expiration(Date.from(expireAt))
+            .signWith(signingKey(), Jwts.SIG.HS256)
             .compact();
     }
 
@@ -80,26 +83,30 @@ public class JwtTokenService {
         String username = claims.getSubject();
         Long userId = numberClaim(claims, CLAIM_USER_ID);
         Long tenantId = numberClaim(claims, CLAIM_TENANT_ID);
-        TokenAudience audience = TokenAudience.fromClaim(claims.getAudience());
+        TokenAudience audience = TokenAudience.fromClaim(firstAudience(claims));
         if (username == null || username.isBlank() || userId == null || tenantId == null || audience == null) {
             throw new SuperAgentFrameException(401, "登录凭证缺少必要身份信息，请重新登录");
         }
+        Long version = numberClaim(claims, CLAIM_TOKEN_VERSION);
         return new AuthenticatedPrincipal(
             tenantId,
             userId,
             username,
             audience,
             numberSetClaim(claims, CLAIM_ROLES),
-            stringSetClaim(claims, CLAIM_PERMISSIONS)
+            stringSetClaim(claims, CLAIM_PERMISSIONS),
+            version == null ? 1L : version,
+            claims.getId()
         );
     }
 
     private Claims parseClaims(String token) {
         try {
             return Jwts.parser()
-                .setSigningKey(adminAuthProperties.getTokenSecret().getBytes(StandardCharsets.UTF_8))
-                .parseClaimsJws(token)
-                .getBody();
+                .verifyWith(signingKey())
+                .build()
+                .parseSignedClaims(token)
+                .getPayload();
         }
         catch (ExpiredJwtException exception) {
             throw new SuperAgentFrameException(401, "登录已过期，请重新登录", exception);
@@ -107,6 +114,27 @@ public class JwtTokenService {
         catch (JwtException | IllegalArgumentException exception) {
             throw new SuperAgentFrameException(401, "登录凭证无效，请重新登录", exception);
         }
+    }
+
+    private SecretKey signingKey() {
+        byte[] secret = adminAuthProperties.getTokenSecret().getBytes(StandardCharsets.UTF_8);
+        if (secret.length < 32) {
+            try {
+                secret = MessageDigest.getInstance("SHA-256").digest(secret);
+            }
+            catch (NoSuchAlgorithmException exception) {
+                throw new IllegalStateException("SHA-256 required to lengthen short JWT secrets", exception);
+            }
+        }
+        return Keys.hmacShaKeyFor(secret);
+    }
+
+    private static String firstAudience(Claims claims) {
+        Set<String> audiences = claims.getAudience();
+        if (audiences == null || audiences.isEmpty()) {
+            return null;
+        }
+        return audiences.iterator().next();
     }
 
     private Long numberClaim(Claims claims, String name) {

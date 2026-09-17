@@ -55,4 +55,17 @@ public interface AuthUserAccountMapper extends BaseMapper<AuthUserAccount> {
     int recordSuccessfulLogin(@Param("tenantId") Long tenantId,
                              @Param("userId") Long userId,
                              @Param("loginAt") Date loginAt);
+
+    /**
+     * 令牌版本 +1，使该用户全部未过期 JWT 立即失效。
+     */
+    @Update("""
+        UPDATE smartledge_user
+           SET token_version = IFNULL(token_version, 1) + 1,
+               edit_time = NOW()
+         WHERE tenant_id = #{tenantId}
+           AND id = #{userId}
+        """)
+    int incrementTokenVersion(@Param("tenantId") Long tenantId,
+                              @Param("userId") Long userId);
 }

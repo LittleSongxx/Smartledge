@@ -22,7 +22,9 @@ import org.smartledge.enums.ChatQueryMode;
 import org.smartledge.enums.KnowledgeBaseSelectionMode;
 import org.smartledge.enums.ChatSessionStatus;
 import org.smartledge.enums.ChatTurnStatus;
+import org.smartledge.database.tenant.TenantContext;
 import org.smartledge.util.DateUtils;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -226,13 +228,28 @@ public class MybatisConversationArchiveStore implements ConversationArchiveStore
         }
         SuperAgentChatDialogue dialogue = dialogueMapper.selectOne(
             activeDialogueByConversation(conversationId)
-                .orderByDesc(SuperAgentChatDialogue::getId)
                 .last("LIMIT 1")
         );
         if (dialogue == null) {
             return Optional.empty();
         }
         return Optional.of(dialogue.getUserId() == null ? NO_OWNER_USER_ID : dialogue.getUserId());
+    }
+
+    @Override
+    public boolean existsInOtherTenant(String conversationId, Long currentTenantId) {
+        if (conversationId == null || conversationId.isBlank() || currentTenantId == null) {
+            return false;
+        }
+        return Boolean.TRUE.equals(TenantContext.callAsSystem(() -> {
+            SuperAgentChatDialogue dialogue = dialogueMapper.selectOne(
+                new LambdaQueryWrapper<SuperAgentChatDialogue>()
+                    .eq(SuperAgentChatDialogue::getConversationId, conversationId)
+                    .eq(SuperAgentChatDialogue::getStatus, BusinessStatus.YES.getCode())
+                    .ne(SuperAgentChatDialogue::getTenantId, currentTenantId)
+                    .last("LIMIT 1"));
+            return dialogue != null;
+        }));
     }
 
     @Override
@@ -415,7 +432,6 @@ public class MybatisConversationArchiveStore implements ConversationArchiveStore
         Objects.requireNonNull(chatMode, "chatMode 不能为空");
         SuperAgentChatDialogue dialogue = dialogueMapper.selectOne(
             activeDialogueByConversation(conversationId)
-                .orderByDesc(SuperAgentChatDialogue::getId)
                 .last("LIMIT 1")
         );
 
@@ -423,6 +439,10 @@ public class MybatisConversationArchiveStore implements ConversationArchiveStore
             SuperAgentChatDialogue newDialogue = new SuperAgentChatDialogue();
             newDialogue.setId(uidGenerator.getUid());
             newDialogue.setConversationId(conversationId);
+            Long tenantId = TenantContext.get();
+            if (tenantId != null && tenantId > 0) {
+                newDialogue.setTenantId(tenantId);
+            }
             // 归属只在新建时写入：0 表示无归属（既不会匹配任何用户，也不会被后来的请求"认领"）。
             newDialogue.setUserId(ownerUserId == null ? NO_OWNER_USER_ID : ownerUserId);
             newDialogue.setSessionStatus(dialogueStage.getCode());
@@ -434,8 +454,17 @@ public class MybatisConversationArchiveStore implements ConversationArchiveStore
             newDialogue.setSelectedKnowledgeBaseNamesJson(writeJson(selectionNames(knowledgeBaseSelection)));
             newDialogue.setStatus(BusinessStatus.YES.getCode());
 
-            dialogueMapper.insert(newDialogue);
-            return;
+            try {
+                dialogueMapper.insert(newDialogue);
+                return;
+            }
+            catch (DuplicateKeyException duplicate) {
+                dialogue = dialogueMapper.selectOne(
+                    activeDialogueByConversation(conversationId).last("LIMIT 1"));
+                if (dialogue == null) {
+                    throw duplicate;
+                }
+            }
         }
 
         boolean stageChanged = !dialogueStage.equals(ChatSessionStatus.fromCode(dialogue.getSessionStatus()));

@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS public.smartledge_document_embedding (
     create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     edit_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     status SMALLINT DEFAULT 1,
+    expires_at TIMESTAMP,
     PRIMARY KEY (id)
     );
 
@@ -69,12 +70,16 @@ COMMENT ON COLUMN public.smartledge_document_embedding.embedding IS '向量值';
 COMMENT ON COLUMN public.smartledge_document_embedding.create_time IS '创建时间';
 COMMENT ON COLUMN public.smartledge_document_embedding.edit_time IS '编辑时间';
 COMMENT ON COLUMN public.smartledge_document_embedding.status IS '1:正常 0:删除';
+COMMENT ON COLUMN public.smartledge_document_embedding.expires_at IS '过期时间，空表示不过期';
 
 CREATE INDEX IF NOT EXISTS idx_smartledge_document_embedding_document_id
     ON public.smartledge_document_embedding (document_id);
 
 CREATE INDEX IF NOT EXISTS idx_smartledge_document_embedding_task_id
     ON public.smartledge_document_embedding (task_id);
+
+CREATE INDEX IF NOT EXISTS idx_smartledge_document_embedding_expires_at
+    ON public.smartledge_document_embedding (expires_at);
 
 CREATE INDEX IF NOT EXISTS idx_smartledge_document_embedding_plan_id
     ON public.smartledge_document_embedding (plan_id);

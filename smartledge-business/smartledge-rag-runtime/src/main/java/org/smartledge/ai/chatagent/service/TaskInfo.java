@@ -11,7 +11,11 @@ import org.smartledge.enums.ChatQueryMode;
 import reactor.core.Disposable;
 import reactor.core.publisher.Sinks;
 
+import org.smartledge.ai.chatagent.agent.ToolCallOutcome;
+
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -40,6 +44,7 @@ public class TaskInfo {
      * 线程返回之后才执行，只有跟着本轮执行走的字段还能拿到当时的租户。</p>
      */
     private final Long tenantId;
+    private final Long userId;
     private final Long selectedDocumentId;
     private final String selectedDocumentName;
     private final Long selectedTaskId;
@@ -65,6 +70,7 @@ public class TaskInfo {
     private final List<String> thinkingSteps;
     private final List<SearchReference> references;
     private final Set<String> usedTools;
+    private final List<ToolCallOutcome> toolOutcomes = Collections.synchronizedList(new ArrayList<>());
 
     private final long startTime;
 
@@ -104,12 +110,43 @@ public class TaskInfo {
                     List<SearchReference> references,
                     Set<String> usedTools,
                     long startTime) {
+        this(conversationId, exchangeId, question, chatMode, traceId, tenantId, null,
+            selectedDocumentId, selectedDocumentName, selectedTaskId, knowledgeBaseSelectionSnapshot,
+            currentDate, currentDateText, executionPlan, debugTrace, traceRecorder, sink, eventMetadata,
+            leaseKey, leaseOwnerToken, thinkingSteps, references, usedTools, startTime);
+    }
+
+    public TaskInfo(String conversationId,
+                    long exchangeId,
+                    String question,
+                    ChatQueryMode chatMode,
+                    String traceId,
+                    Long tenantId,
+                    Long userId,
+                    Long selectedDocumentId,
+                    String selectedDocumentName,
+                    Long selectedTaskId,
+                    KnowledgeBaseSelectionSnapshot knowledgeBaseSelectionSnapshot,
+                    LocalDate currentDate,
+                    String currentDateText,
+                    ConversationExecutionPlan executionPlan,
+                    ChatDebugTrace debugTrace,
+                    ConversationTraceRecorder traceRecorder,
+                    Sinks.Many<String> sink,
+                    StreamEventMetadata eventMetadata,
+                    String leaseKey,
+                    String leaseOwnerToken,
+                    List<String> thinkingSteps,
+                    List<SearchReference> references,
+                    Set<String> usedTools,
+                    long startTime) {
         this.conversationId = conversationId;
         this.exchangeId = exchangeId;
         this.question = question;
         this.chatMode = chatMode;
         this.traceId = traceId;
         this.tenantId = tenantId;
+        this.userId = userId;
         this.selectedDocumentId = selectedDocumentId;
         this.selectedDocumentName = selectedDocumentName;
         this.selectedTaskId = selectedTaskId;
@@ -151,6 +188,10 @@ public class TaskInfo {
 
     public Long tenantId() {
         return tenantId;
+    }
+
+    public Long userId() {
+        return userId;
     }
 
     public ConversationTraceRecorder traceRecorder() {
@@ -235,6 +276,10 @@ public class TaskInfo {
 
     public Set<String> usedTools() {
         return usedTools;
+    }
+
+    public List<ToolCallOutcome> toolOutcomes() {
+        return toolOutcomes;
     }
 
     public long startTime() {

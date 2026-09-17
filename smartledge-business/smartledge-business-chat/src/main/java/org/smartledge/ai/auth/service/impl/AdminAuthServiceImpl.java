@@ -2,6 +2,7 @@ package org.smartledge.ai.auth.service.impl;
 
 import org.smartledge.ai.auth.dto.UserLoginRequest;
 import org.smartledge.ai.auth.service.AdminAuthService;
+import org.smartledge.ai.auth.service.AuthAccountStore;
 import org.smartledge.ai.auth.service.UserAuthService;
 import org.smartledge.ai.auth.support.AdminRequestContext;
 import org.smartledge.ai.auth.support.AuthenticatedPrincipal;
@@ -18,8 +19,11 @@ public class AdminAuthServiceImpl implements AdminAuthService {
 
     private final UserAuthService userAuthService;
 
-    public AdminAuthServiceImpl(UserAuthService userAuthService) {
+    private final AuthAccountStore authAccountStore;
+
+    public AdminAuthServiceImpl(UserAuthService userAuthService, AuthAccountStore authAccountStore) {
         this.userAuthService = userAuthService;
+        this.authAccountStore = authAccountStore;
     }
 
     @Override
@@ -37,5 +41,12 @@ public class AdminAuthServiceImpl implements AdminAuthService {
             principal.tenantId(),
             principal.permissions()
         );
+    }
+
+    @Override
+    public void logout() {
+        AuthenticatedPrincipal principal = AdminRequestContext.currentPrincipal()
+            .orElseThrow(() -> new AuthFailureException(401, "请先登录"));
+        authAccountStore.incrementTokenVersion(principal.tenantId(), principal.userId());
     }
 }

@@ -497,6 +497,7 @@ import {
   WrenchScrewdriverIcon
 } from '@heroicons/vue/24/outline'
 import { manageApi } from '../../api/api'
+import { denyPortfolioWrite } from '../../utils/demoAccounts'
 import { useConfirm } from '@/composables/useConfirm'
 import {
   controlBounds,
@@ -753,6 +754,7 @@ function openView(item) {
 }
 
 function openEdit(item) {
+  if (denyPortfolioWrite((message) => { feedback.value = message })) return
   editItem.value = item
   const draft = editDrafts.value[item.configKey]
   editValue.value = draft ? draft.value : controlValueFromItem(item)
@@ -794,6 +796,7 @@ function nudgeEditValue(direction) {
 }
 
 async function saveEdit() {
+  if (denyPortfolioWrite((message) => { editError.value = message })) return
   if (!validateEdit()) return
   if (!changeNote.value.trim()) {
     editError.value = '请填写修改说明。'
@@ -829,6 +832,7 @@ async function saveEdit() {
 }
 
 async function openHistoryDetail(record) {
+  if (denyPortfolioWrite((message) => { historyDetailError.value = message; historyDetailOpen.value = true; historyDetail.value = null })) return
   historyDetailOpen.value = true
   historyDetailLoading.value = true
   historyDetailError.value = ''
@@ -843,6 +847,7 @@ async function openHistoryDetail(record) {
 }
 
 async function restoreRecord(record) {
+  if (denyPortfolioWrite((message) => { feedback.value = message })) return
   const accepted = await confirm(
     `将把全部参数恢复为历史版本 v${record.afterVersion} 的状态，并新增一条恢复历史。当前历史不会被覆盖。`,
     '恢复历史配置'

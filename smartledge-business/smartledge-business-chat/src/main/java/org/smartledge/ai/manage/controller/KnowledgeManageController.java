@@ -15,7 +15,10 @@ import org.smartledge.ai.manage.dto.KnowledgeTopicSaveDto;
 import org.smartledge.ai.manage.dto.TopicDocumentRelationListQueryDto;
 import org.smartledge.ai.manage.dto.TopicDocumentRelationRemoveDto;
 import org.smartledge.ai.manage.dto.TopicDocumentRelationSaveDto;
+import org.smartledge.ai.auth.support.PortfolioPermissions;
+import org.smartledge.ai.chatagent.service.ConversationAccessGuard;
 import org.smartledge.ai.manage.service.KnowledgeManageService;
+import org.smartledge.database.tenant.TenantContext;
 import org.smartledge.ai.manage.vo.DocumentProfileVo;
 import org.smartledge.ai.manage.vo.KnowledgeRouteTracePageVo;
 import org.smartledge.ai.manage.vo.KnowledgeScopeItemVo;
@@ -41,8 +44,12 @@ public class KnowledgeManageController {
 
     private final KnowledgeManageService knowledgeManageService;
 
-    public KnowledgeManageController(KnowledgeManageService knowledgeManageService) {
+    private final ConversationAccessGuard conversationAccessGuard;
+
+    public KnowledgeManageController(KnowledgeManageService knowledgeManageService,
+                                     ConversationAccessGuard conversationAccessGuard) {
         this.knowledgeManageService = knowledgeManageService;
+        this.conversationAccessGuard = conversationAccessGuard;
     }
 
     @Operation(summary = "保存知识范围节点")
@@ -129,6 +136,16 @@ public class KnowledgeManageController {
     @PostMapping("/route/trace/page/query")
     @RequiresPermission("observe:read")
     public ApiResponse<KnowledgeRouteTracePageVo> queryRouteTracePage(@RequestBody(required = false) KnowledgeRouteTraceQueryDto dto) {
-        return ApiResponse.ok(knowledgeManageService.queryRouteTracePage(dto == null ? new KnowledgeRouteTraceQueryDto() : dto));
+        KnowledgeRouteTraceQueryDto query = dto == null ? new KnowledgeRouteTraceQueryDto() : dto;
+        if (PortfolioPermissions.isDemo(TenantContext.getIdentity())) {
+            String conversationId = query.getConversationId() == null ? "" : query.getConversationId().trim();
+            if (conversationId.isEmpty()) {
+                String pageNo = query.getPageNo() == null || query.getPageNo().isBlank() ? "1" : query.getPageNo().trim();
+                String pageSize = query.getPageSize() == null || query.getPageSize().isBlank() ? "20" : query.getPageSize().trim();
+                return ApiResponse.ok(new KnowledgeRouteTracePageVo(pageNo, pageSize, "0", "0", List.of()));
+            }
+            conversationAccessGuard.requireOwned(conversationId);
+        }
+        return ApiResponse.ok(knowledgeManageService.queryRouteTracePage(query));
     }
 }

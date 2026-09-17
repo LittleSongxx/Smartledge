@@ -82,10 +82,23 @@ class ConversationAccessGuardTest {
     void newConversationAllowedButExistingMustBeOwned() {
         authenticate(3L);
         when(conversationArchiveStore.findOwnerUserId("new")).thenReturn(Optional.empty());
+        when(conversationArchiveStore.existsInOtherTenant("new", 1L)).thenReturn(false);
         when(conversationArchiveStore.findOwnerUserId("mine")).thenReturn(Optional.of(3L));
 
         guard().requireOwnedOrNew("new");
         guard().requireOwnedOrNew("mine");
+    }
+
+    @Test
+    @DisplayName("他租户已占用同一 dialogue_code 时拒绝，且不泄漏占用方")
+    void otherTenantOccupationIsRejected() {
+        authenticate(3L);
+        when(conversationArchiveStore.findOwnerUserId("shared")).thenReturn(Optional.empty());
+        when(conversationArchiveStore.existsInOtherTenant("shared", 1L)).thenReturn(true);
+
+        assertThatThrownBy(() -> guard().requireOwnedOrNew("shared"))
+            .isInstanceOf(SuperAgentFrameException.class)
+            .hasMessageContaining("不属于当前账号");
     }
 
     @Test
@@ -108,8 +121,50 @@ class ConversationAccessGuardTest {
         assertThat(guard().requireCurrentUserId()).isEqualTo(3L);
     }
 
+    @Test
+    @DisplayName("管理观测允许查看本租户内他人会话")
+    void observeAllowsOtherUsersSessionInTenant() {
+        authenticate(3L);
+        when(conversationArchiveStore.findOwnerUserId("theirs")).thenReturn(Optional.of(9L));
+        guard().requireVisibleInTenant("theirs");
+    }
+
+    @Test
+    @DisplayName("试用账号的管理观测不能查看他人会话")
+    void demoObserveCannotSeeOtherUsersSession() {
+        authenticate(201L, Set.of("chat:use", "observe:read", "portfolio:demo"));
+        when(conversationArchiveStore.findOwnerUserId("theirs")).thenReturn(Optional.of(9L));
+        when(conversationArchiveStore.findOwnerUserId("mine")).thenReturn(Optional.of(201L));
+
+        assertThatThrownBy(() -> guard().requireVisibleInTenant("theirs"))
+            .isInstanceOf(SuperAgentFrameException.class)
+            .hasMessageContaining("不属于当前账号");
+        guard().requireVisibleInTenant("mine");
+        assertThat(guard().observeOwnerFilter()).isEqualTo(201L);
+    }
+
+    @Test
+    @DisplayName("非试用管理观测不过滤主人")
+    void nonDemoObserveOwnerFilterIsOpen() {
+        authenticate(3L);
+        assertThat(guard().observeOwnerFilter()).isNull();
+    }
+
+    @Test
+    @DisplayName("管理观测对不存在的会话 fail closed")
+    void observeRejectsMissingSession() {
+        authenticate(3L);
+        when(conversationArchiveStore.findOwnerUserId("missing")).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> guard().requireVisibleInTenant("missing"))
+            .isInstanceOf(SuperAgentFrameException.class)
+            .hasMessageContaining("不属于当前账号");
+    }
+
     private void authenticate(Long userId) {
-        TenantContext.setIdentity(new RequestIdentity(1L, userId, "user-" + userId, Set.of(3L),
-            Set.of("chat:use")));
+        authenticate(userId, Set.of("chat:use"));
+    }
+
+    private void authenticate(Long userId, Set<String> permissions) {
+        TenantContext.setIdentity(new RequestIdentity(1L, userId, "user-" + userId, Set.of(3L), permissions));
     }
 }

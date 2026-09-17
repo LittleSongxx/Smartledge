@@ -70,4 +70,13 @@ public class DocumentListItemVo {
     private Date createTime;
 
     private Date editTime;
+
+    /** 当前身份是否持有该文档的 ACL MANAGE，用于授权页按钮。 */
+    private Boolean canManageAcl;
+
+    /** 对话侧 ACL 是否允许提问（与管理端 read-all 列表可能不一致）。 */
+    private Boolean conversationAskable;
+
+    /** 管理端因 read-all 看得见，但对话 ACL 问不到。 */
+    private Boolean visibleButNotAskable;
 }

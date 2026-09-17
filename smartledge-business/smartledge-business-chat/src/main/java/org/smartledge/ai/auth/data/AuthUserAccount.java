@@ -42,4 +42,9 @@ public class AuthUserAccount extends BaseTableData {
     private Date lockedUntil;
 
     private Date lastLoginAt;
+
+    /**
+     * 令牌版本。停用、改角色、登出后递增，使已签发 JWT 立即失效。
+     */
+    private Long tokenVersion;
 }

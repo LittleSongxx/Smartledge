@@ -22,4 +22,15 @@ public interface DocumentKeywordSearchGateway {
     void deleteByTask(Long documentId, Long taskId);
 
     void deleteByDocumentId(Long documentId);
+
+    default void tombstoneByDocumentId(Long documentId) {
+        deleteByDocumentId(documentId);
+    }
+
+    default void tombstoneByTask(Long documentId, Long taskId) {
+        deleteByTask(documentId, taskId);
+    }
+
+    default void tombstoneStaleTasks(Long documentId, Long currentTaskId) {
+    }
 }

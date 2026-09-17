@@ -3,6 +3,7 @@ package org.smartledge.ai.chatagent.service;
 import org.smartledge.database.tenant.RequestIdentity;
 import org.smartledge.database.tenant.TenantContext;
 import org.smartledge.ai.auth.support.AuthFailureException;
+import org.smartledge.ai.auth.support.PortfolioPermissions;
 import org.springframework.stereotype.Component;
 
 /**
@@ -36,6 +37,33 @@ public class ConversationAccessGuard {
     }
 
     /**
+     * 会话必须存在于当前租户（管理观测用）。
+     *
+     * <p>不检查会话主人：持有 {@code observe:read} 的管理端可以看本租户任意会话。
+     * 跨租户会话被 SQL 租户改写挡掉，这里只表现为"不存在"。</p>
+     */
+    public void requireVisibleInTenant(String conversationId) {
+        RequestIdentity identity = requireIdentity();
+        if (PortfolioPermissions.isDemo(identity)) {
+            requireOwned(conversationId);
+            return;
+        }
+        if (conversationArchiveStore.findOwnerUserId(conversationId).isEmpty()) {
+            throw new AuthFailureException(403, "会话不存在或不属于当前账号");
+        }
+    }
+
+    /**
+     * 管理观测列表的主人过滤。
+     *
+     * <p>普通管理角色看本租户全部会话；试用账号只能看自己的，避免作品集访客翻到内部对话。</p>
+     */
+    public Long observeOwnerFilter() {
+        RequestIdentity identity = requireIdentity();
+        return PortfolioPermissions.isDemo(identity) ? identity.userId() : null;
+    }
+
+    /**
      * 会话必须存在且属于当前身份（读、写、停止、重置、重建摘要都走这里）。
      */
     public void requireOwned(String conversationId) {
@@ -55,6 +83,9 @@ public class ConversationAccessGuard {
         RequestIdentity identity = requireIdentity();
         Long ownerUserId = conversationArchiveStore.findOwnerUserId(conversationId).orElse(null);
         if (ownerUserId == null) {
+            if (conversationArchiveStore.existsInOtherTenant(conversationId, identity.tenantId())) {
+                throw new AuthFailureException(403, "会话不存在或不属于当前账号");
+            }
             return;
         }
         if (ownerUserId == 0L || !ownerUserId.equals(identity.userId())) {

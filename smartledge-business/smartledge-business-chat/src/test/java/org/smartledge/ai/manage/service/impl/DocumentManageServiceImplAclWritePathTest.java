@@ -7,7 +7,10 @@ import org.smartledge.ai.manage.dto.DocumentUploadDto;
 import org.smartledge.ai.manage.support.StoredObjectInfo;
 import org.smartledge.ai.manage.data.SuperAgentKnowledgeBase;
 import org.smartledge.ai.manage.dto.DocumentDeleteDto;
+import org.smartledge.ai.manage.dto.DocumentDetailQueryDto;
 import org.smartledge.ai.manage.dto.DocumentIndexBuildDto;
+import org.smartledge.ai.manage.dto.DocumentPageQueryDto;
+import org.smartledge.ai.manage.dto.DocumentParseArtifactQueryDto;
 import org.smartledge.ai.manage.mapper.SuperAgentDocumentMapper;
 import org.smartledge.ai.manage.mapper.SuperAgentDocumentTaskMapper;
 import org.smartledge.ai.manage.mq.DocumentMessagePublisher;
@@ -22,7 +25,9 @@ import org.smartledge.database.tenant.TenantContext;
 import org.smartledge.enums.BusinessStatus;
 import org.smartledge.exception.SuperAgentFrameException;
 import org.smartledge.ai.auth.support.AuthFailureException;
+import org.smartledge.ai.manage.support.MybatisLambdaCacheTestSupport;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -99,6 +104,11 @@ class DocumentManageServiceImplAclWritePathTest {
 
     @InjectMocks
     private DocumentManageServiceImpl service;
+
+    @BeforeAll
+    static void initMybatisMetadata() {
+        MybatisLambdaCacheTestSupport.initialize(SuperAgentDocument.class);
+    }
 
     @AfterEach
     void tearDown() {
@@ -186,6 +196,74 @@ class DocumentManageServiceImplAclWritePathTest {
         assertThatThrownBy(() -> service.buildIndex(dto)).isInstanceOf(AuthFailureException.class);
 
         verify(documentAclStore).writableDocumentIds(eq(List.of(DOCUMENT_ID)), eq(identity));
+    }
+
+    @Test
+    @DisplayName("无 ACL 且无 document:read-all 时不能读文档详情")
+    void detailRequiresAclWhenNoReadAll() {
+        authenticate(ADMIN_USER_ID);
+        SuperAgentDocument document = new SuperAgentDocument();
+        document.setId(DOCUMENT_ID);
+        document.setStatus(1);
+        when(documentMapper.selectById(DOCUMENT_ID)).thenReturn(document);
+        when(documentAclStore.visibleDocumentIds(any(), any())).thenReturn(Set.of());
+
+        DocumentDetailQueryDto dto = new DocumentDetailQueryDto();
+        dto.setDocumentId(DOCUMENT_ID);
+
+        assertThatThrownBy(() -> service.queryDocumentDetail(dto))
+            .isInstanceOf(AuthFailureException.class)
+            .hasMessageContaining("没有查看该文档的权限");
+    }
+
+    @Test
+    @DisplayName("持 document:read-all 时列表不按 ACL 收窄")
+    void pageWithReadAllDoesNotQueryVisibleIds() {
+        RequestIdentity identity = new RequestIdentity(TENANT_ID, ADMIN_USER_ID, "admin", Set.of(1L),
+            Set.of("document:read", "document:read-all"));
+        TenantContext.setIdentity(identity);
+        when(documentMapper.selectPage(any(), any())).thenReturn(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>());
+
+        DocumentPageQueryDto dto = new DocumentPageQueryDto();
+        dto.setPageNo(1);
+        dto.setPageSize(10);
+        service.queryDocumentPage(dto);
+
+        verify(documentAclStore, never()).visibleDocumentIdsForIdentity(any());
+    }
+
+    @Test
+    @DisplayName("仅 document:read 时列表走 visibleDocumentIdsForIdentity")
+    void pageWithoutReadAllUsesAcl() {
+        authenticate(ADMIN_USER_ID);
+        when(documentAclStore.visibleDocumentIdsForIdentity(any())).thenReturn(Set.of());
+
+        DocumentPageQueryDto dto = new DocumentPageQueryDto();
+        dto.setPageNo(1);
+        dto.setPageSize(10);
+        var page = service.queryDocumentPage(dto);
+
+        assertThat(page.getTotal()).isZero();
+        verify(documentAclStore).visibleDocumentIdsForIdentity(any());
+        verify(documentMapper, never()).selectPage(any(), any());
+    }
+
+    @Test
+    @DisplayName("无 ACL 且无 document:read-all 时不能读解析产物")
+    void parseArtifactsRequireAclWhenNoReadAll() {
+        authenticate(ADMIN_USER_ID);
+        SuperAgentDocument document = new SuperAgentDocument();
+        document.setId(DOCUMENT_ID);
+        document.setStatus(1);
+        when(documentMapper.selectById(DOCUMENT_ID)).thenReturn(document);
+        when(documentAclStore.visibleDocumentIds(any(), any())).thenReturn(Set.of());
+
+        DocumentParseArtifactQueryDto dto = new DocumentParseArtifactQueryDto();
+        dto.setDocumentId(DOCUMENT_ID);
+
+        assertThatThrownBy(() -> service.queryParseArtifacts(dto))
+            .isInstanceOf(AuthFailureException.class)
+            .hasMessageContaining("没有查看该文档的权限");
     }
 
     @Test

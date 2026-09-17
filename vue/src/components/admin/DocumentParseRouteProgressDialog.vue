@@ -282,7 +282,10 @@ async function loadProgress(options = {}) {
 function startPolling() {
   clearPolling()
   let consecutiveErrorCount = 0
+  let inFlight = false
   pollTimer.value = window.setInterval(async () => {
+    if (inFlight) return
+    inFlight = true
     try {
       await loadProgress()
       consecutiveErrorCount = 0
@@ -296,6 +299,8 @@ function startPolling() {
         loadError.value = '解析任务仍在后台执行，但进度轮询连续失败，请稍后刷新详情页。'
         clearPolling()
       }
+    } finally {
+      inFlight = false
     }
   }, POLL_INTERVAL_MS)
 }

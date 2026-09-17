@@ -5,6 +5,7 @@ import org.smartledge.ai.knowledge.indexing.port.EmbeddingPort;
 import org.smartledge.ai.model.http.ModelHttpClient;
 import org.smartledge.ai.model.http.ModelHttpSettings;
 import org.smartledge.ai.rag.runtime.model.ChatCallOptions;
+import org.smartledge.ai.rag.runtime.observe.OtelGenAiChatModelPort;
 import org.smartledge.ai.rag.runtime.port.ChatModelPort;
 import org.smartledge.ai.ragtools.adapter.RagToolsEmbeddingAdapter;
 import org.smartledge.ai.ragtools.client.RagToolsClient;
@@ -32,7 +33,9 @@ public class AiModelConfiguration {
             transport.getMaxResponseBytes(), transport.getMaxToolArgumentBytes(), retry.getChatMaxAttempts(),
             retry.getEmbeddingMaxAttempts(), retry.getBackoff(), transport.getWorkerThreads()), mapper);
     }
-    @Bean ChatModelPort chatModelPort(ModelHttpClient client) { return client.chat(); }
+    @Bean ChatModelPort chatModelPort(ModelHttpClient client) {
+        return new OtelGenAiChatModelPort(client.chat());
+    }
 
     /**
      * 向量化实现。

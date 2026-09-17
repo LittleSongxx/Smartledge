@@ -21,6 +21,8 @@ public class DocumentKeywordIndexRecord {
 
     private String chunkId;
 
+    private Long tenantId;
+
     private Long documentId;
 
     private Long taskId;
@@ -66,4 +68,11 @@ public class DocumentKeywordIndexRecord {
     private List<String> questions = new ArrayList<>();
 
     private String chunkText;
+
+    private Integer status;
+
+    private String expiresAt;
+
+    @Builder.Default
+    private java.util.Map<String, String> userMetadata = new java.util.LinkedHashMap<>();
 }

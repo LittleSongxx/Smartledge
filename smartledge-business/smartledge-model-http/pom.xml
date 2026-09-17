@@ -16,6 +16,11 @@
 
     <dependencies>
         <dependency><groupId>io.projectreactor</groupId><artifactId>reactor-core</artifactId></dependency>
+        <dependency>
+            <groupId>com.openai</groupId>
+            <artifactId>openai-java</artifactId>
+            <version>${openai-java.version}</version>
+        </dependency>
         <dependency><groupId>org.smartledge</groupId><artifactId>smartledge-rag-runtime</artifactId><version>${revision}</version></dependency>
         <dependency><groupId>com.fasterxml.jackson.core</groupId><artifactId>jackson-databind</artifactId></dependency>
         <dependency><groupId>org.smartledge</groupId><artifactId>smartledge-knowledge-indexing</artifactId><version>${revision}</version></dependency>

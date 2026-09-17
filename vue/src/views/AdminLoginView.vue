@@ -2,7 +2,7 @@
   <div class="relative grid min-h-dvh place-items-center bg-admin-bg px-4 py-16 sm:px-6">
     <main class="w-full max-w-[440px]">
       <div class="mb-5 flex items-center gap-3 px-1">
-        <div class="grid size-9 place-items-center rounded-md bg-primary text-caption font-bold text-primary-foreground">NA</div>
+        <div class="grid size-9 place-items-center rounded-md bg-primary text-caption font-bold text-primary-foreground">SL</div>
         <div>
           <p class="m-0 text-caption text-muted-foreground">Smartledge</p>
           <h1 class="m-0 text-title-sm font-semibold text-foreground">管理后台</h1>
@@ -20,7 +20,9 @@
 
         <div class="mt-5 flex flex-col gap-4">
           <div class="flex flex-col gap-2">
-            <Label for="login-username">账号</Label>
+            <div class="flex min-h-8 items-center">
+              <Label for="login-username">账号</Label>
+            </div>
             <Input
               id="login-username"
               v-model="form.username"
@@ -33,7 +35,7 @@
           </div>
 
           <div class="flex flex-col gap-2">
-            <div class="flex items-center justify-between gap-3">
+            <div class="flex min-h-8 items-center justify-between gap-3">
               <Label for="login-password">密码</Label>
               <Button
                 variant="ghost"
@@ -57,23 +59,13 @@
               :aria-describedby="errorMessage ? 'login-error' : undefined"
             />
           </div>
-
-          <div class="flex flex-col gap-2">
-            <Label for="login-tenant">租户编码（可选）</Label>
-            <Input
-              id="login-tenant"
-              v-model="form.tenantCode"
-              type="text"
-              placeholder="留空使用默认租户"
-              autocomplete="organization"
-            />
-            <p class="m-0 text-caption text-muted-foreground">账号在租户内唯一；非默认租户的管理账号需要填写租户编码。</p>
-          </div>
         </div>
 
         <p v-if="errorMessage" id="login-error" role="alert" class="mt-4 rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-body-sm text-destructive">
           {{ errorMessage }}
         </p>
+
+        <PortfolioTrialHint audience="admin" />
 
         <div class="mt-6">
           <Button class="w-full rounded-md" size="lg" type="submit" :loading="submitting" loading-text="登录中">进入管理台</Button>
@@ -90,8 +82,10 @@ import { computed, reactive, ref } from 'vue'
 import { EyeIcon, EyeSlashIcon } from '@heroicons/vue/24/outline'
 import { useRoute, useRouter } from 'vue-router'
 import IcpFooter from '../components/IcpFooter.vue'
+import PortfolioTrialHint from '../components/system/PortfolioTrialHint.vue'
 import { adminAuthApi, APIError } from '../api/api'
 import { saveAdminAuth } from '../utils/adminAuth'
+import { PORTFOLIO_TRIAL } from '../utils/demoAccounts'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -99,7 +93,10 @@ import { Label } from '@/components/ui/label'
 const router = useRouter()
 const route = useRoute()
 
-const form = reactive({ username: 'admin', password: 'admin123456', tenantCode: '' })
+const form = reactive({
+  username: PORTFOLIO_TRIAL.admin.username,
+  password: PORTFOLIO_TRIAL.admin.password
+})
 const errorMessage = ref('')
 const submitting = ref(false)
 const showPassword = ref(false)
@@ -118,12 +115,7 @@ async function submitLogin() {
   submitting.value = true
   try {
     const username = form.username.trim()
-    const tenantCode = form.tenantCode.trim()
-    const credentials = { username, password: form.password }
-    if (tenantCode) {
-      credentials.tenantCode = tenantCode
-    }
-    const result = await adminAuthApi.login(credentials)
+    const result = await adminAuthApi.login({ username, password: form.password })
     saveAdminAuth({ username: result?.username || username, token: result?.token || '' })
     router.replace(safeRedirect.value)
   } catch (error) {

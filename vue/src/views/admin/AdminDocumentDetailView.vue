@@ -235,7 +235,7 @@
                 <dd class="mt-1 break-words text-sm font-medium text-foreground">{{ row.value }}</dd>
               </div>
             </dl>
-            <p v-else class="mt-4 rounded-md border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">这份文档未配置可展示的属性。</p>
+            <p v-else class="mt-4 rounded-md border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">这份文档没有额外业务属性；不影响解析、检索和授权。</p>
           </section>
 
           <!-- 处理状态轨道：完成=空心绿勾 / 当前=实心焦点 / 待办=中性，颜色非唯一信号 -->
@@ -276,7 +276,7 @@
 
         <section v-show="activeWorkbenchSection === 'strategy'" ref="strategySectionRef" class="mt-5" data-workbench-section="strategy">
 
-          <div v-if="documentDetail.parseErrorMsg" class="mt-4 rounded-md border border-destructive/10 bg-destructive/[0.06] px-3 py-2.5 text-sm text-destructive">{{ documentDetail.parseErrorMsg }}</div>
+          <div v-if="documentDetail.parseErrorMsg" class="mt-4 rounded-md border border-destructive/10 bg-destructive/[0.06] px-3 py-2.5 text-sm text-destructive">{{ sanitizeOperatorError(documentDetail.parseErrorMsg, '解析失败') }}</div>
 
           <div v-if="strategySystemStages.length" class="mb-5 flex items-center">
             <template v-for="(item, i) in strategySystemStages" :key="`strategy-stage-${item.code}`">
@@ -672,6 +672,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowDownIcon, ArrowDownTrayIcon, ArrowLeftIcon, ArrowPathIcon, ArrowRightIcon, CheckCircleIcon, ChevronDownIcon, ChevronUpIcon, ClipboardDocumentIcon, ClockIcon, ExclamationCircleIcon, EyeIcon, MagnifyingGlassIcon, PlusIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 import { APIError, manageApi } from '../../api/api'
+import { denyPortfolioWrite } from '../../utils/demoAccounts'
 import AdminStatusBadge from '../../components/admin/AdminStatusBadge.vue'
 import DocumentParseRouteProgressDialog from '../../components/admin/DocumentParseRouteProgressDialog.vue'
 import DocumentTaskHistoryDialog from '../../components/admin/DocumentTaskHistoryDialog.vue'
@@ -682,7 +683,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
-import { formatCount, formatDateTime, hasCode, normalizeCode } from '../../utils/manageFormat'
+import { formatCount, formatDateTime, hasCode, normalizeCode, sanitizeOperatorError } from '../../utils/manageFormat'
 import {
   STRATEGY_LIBRARY,
   STRATEGY_PIPELINE_LIBRARY,
@@ -701,10 +702,13 @@ import {
   resolveWorkflowStepTone
 } from '@/features/admin/documentWorkflow'
 import { documentMetadataDisplayRows } from '@/features/admin/documentMetadataCatalog'
+import { createLatestRequestGuard, createNonOverlappingInterval } from '@/features/admin/adminBehavior'
+import { getAdminOperatorId } from '../../utils/adminAuth'
 
 const route = useRoute()
 const router = useRouter()
-const OPERATOR_ID = '10001'
+const OPERATOR_ID = getAdminOperatorId()
+const detailRequestGuard = createLatestRequestGuard()
 const DEFAULT_CHUNK_PAGE_SIZE = 20
 const CHUNK_PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 const WORKBENCH_SECTION_KEYS = ['overview', 'strategy', 'execution', 'chunk', 'rag', 'tasks']
@@ -760,8 +764,39 @@ const chunkDetailDrawerOpen = ref(false)
 const artifactPreviewDrawerOpen = ref(false)
 const artifactPreviewCollapsed = ref(false)
 const artifactSearchKeyword = ref('')
-const planPollTimer = ref(null)
-const buildPollTimer = ref(null)
+let planPollCount = 0
+const buildPoller = createNonOverlappingInterval(async () => {
+  const progress = await loadBuildProgress()
+  const building = progress?.building === true
+    || ['1', '2'].includes(normalizeCode(buildTaskSnapshot.value?.taskStatus))
+    || hasCode(documentDetail.value?.indexStatus, 2)
+  if (!building) {
+    await refreshBuildCompletionArtifacts()
+    return true
+  }
+  return false
+}, 3000, {
+  maxConsecutiveErrors: 10,
+  onError(error, count) {
+    console.error('轮询索引构建状态失败', error)
+    if (count >= 10) {
+      showNotice('索引构建仍在后台执行，但进度轮询连续失败，请稍后手动刷新。', 'warning')
+    }
+  }
+})
+const planPoller = createNonOverlappingInterval(async () => {
+  planPollCount += 1
+  await loadDocumentDetail()
+  await loadStrategyPlan()
+  return Boolean(strategyPlan.value?.planReady
+    || normalizeCode(strategyPlan.value?.parseStatus) === '4'
+    || planPollCount >= 8)
+}, 2500, {
+  maxConsecutiveErrors: 3,
+  onError(error) {
+    console.error('轮询策略结果失败', error)
+  }
+})
 const parseRouteDialogOpen = ref(false)
 const parseRouteDialogTaskId = ref('')
 const buildProgressLatestLogId = ref(null)
@@ -801,7 +836,7 @@ const showOriginalFileName = computed(() => {
   return Boolean(originalFileName) && originalFileName !== documentName
 })
 const documentMetadataRows = computed(() => documentMetadataDisplayRows(documentDetail.value?.metadataJson))
-const isBuildPolling = computed(() => buildPollTimer.value != null)
+const isBuildPolling = computed(() => buildPoller.isActive())
 const selectedParentStrategyPreview = computed(() => buildStrategyPreview(selectedParentStrategyTypes.value, strategyLibrary))
 const selectedChildStrategyPreview = computed(() => buildStrategyPreview(selectedChildStrategyTypes.value, strategyLibrary))
 const selectedParentStrategyRows = computed(() => buildSequenceRows(selectedParentStrategyPreview.value))
@@ -1162,7 +1197,7 @@ const workflowCurrentPhase = computed(() => {
       tone: 'danger',
       shortLabel: '需处理',
       title: '文档解析失败',
-      description: documentDetail.value?.parseErrorMsg || '请先排查解析异常，再继续后续推荐与构建流程。'
+      description: sanitizeOperatorError(documentDetail.value?.parseErrorMsg, '请先排查解析异常，再继续后续推荐与构建流程。')
     }
   }
   if (!hasCode(documentDetail.value?.parseStatus, 3)) {
@@ -2288,10 +2323,12 @@ function change子块PageSize(pageSize) {
 }
 
 async function loadAll() {
+  const requestId = detailRequestGuard.begin()
   loading.value = true
   clearNotice()
   try {
     await loadDocumentDetail()
+    if (!detailRequestGuard.isCurrent(requestId)) return
     await Promise.all([
       loadStrategyPlan(),
       loadTaskLogs(),
@@ -2299,15 +2336,18 @@ async function loadAll() {
       loadDocumentChunks(),
       loadDocumentRagSnapshot()
     ])
+    if (!detailRequestGuard.isCurrent(requestId)) return
   } catch (error) {
+    if (!detailRequestGuard.isCurrent(requestId)) return
     console.error('读取文档详情失败', error)
     showNotice(normalizeError(error, '读取文档详情失败'), 'danger')
   } finally {
-    loading.value = false
+    if (detailRequestGuard.isCurrent(requestId)) loading.value = false
   }
 }
 
 async function submitConfirmStrategy() {
+  if (denyPortfolioWrite((message) => showNotice(message, 'danger'))) return
   if (!strategyPlan.value?.plan?.planId) {
     showNotice('当前还没有可确认的策略方案。', 'danger')
     return
@@ -2352,6 +2392,7 @@ async function submitConfirmStrategy() {
 }
 
 async function submitBuildIndex() {
+  if (denyPortfolioWrite((message) => showNotice(message, 'danger'))) return
   if (!hasSelectedStrategy.value) {
     showNotice('请先选择并确认父块 / 子块双流水线，再执行索引构建。', 'danger')
     return
@@ -2524,35 +2565,11 @@ function handleArtifactDialogOpen(open) {
 }
 
 function clearBuildPolling() {
-  if (buildPollTimer.value) {
-    window.clearInterval(buildPollTimer.value)
-    buildPollTimer.value = null
-  }
+  buildPoller.clear()
 }
 
 function startBuildPolling() {
-  clearBuildPolling()
-  let consecutiveErrorCount = 0
-  buildPollTimer.value = window.setInterval(async () => {
-    try {
-      const progress = await loadBuildProgress()
-      consecutiveErrorCount = 0
-      const building = progress?.building === true
-        || ['1', '2'].includes(normalizeCode(buildTaskSnapshot.value?.taskStatus))
-        || hasCode(documentDetail.value?.indexStatus, 2)
-      if (!building) {
-        clearBuildPolling()
-        await refreshBuildCompletionArtifacts()
-      }
-    } catch (error) {
-      console.error('轮询索引构建状态失败', error)
-      consecutiveErrorCount += 1
-      if (consecutiveErrorCount >= 10) {
-        showNotice('索引构建仍在后台执行，但进度轮询连续失败，请稍后手动刷新。', 'warning')
-        clearBuildPolling()
-      }
-    }
-  }, 3000)
+  buildPoller.start()
 }
 
 async function refreshBuildCompletionArtifacts() {
@@ -2569,25 +2586,8 @@ async function refreshBuildCompletionArtifacts() {
 }
 
 function startPlanPolling() {
-  if (planPollTimer.value) {
-    window.clearInterval(planPollTimer.value)
-  }
-  let pollCount = 0
-  planPollTimer.value = window.setInterval(async () => {
-    pollCount += 1
-    try {
-      await loadDocumentDetail()
-      await loadStrategyPlan()
-      if (strategyPlan.value?.planReady || normalizeCode(strategyPlan.value?.parseStatus) === '4' || pollCount >= 8) {
-        window.clearInterval(planPollTimer.value)
-        planPollTimer.value = null
-      }
-    } catch (error) {
-      console.error('轮询策略结果失败', error)
-      window.clearInterval(planPollTimer.value)
-      planPollTimer.value = null
-    }
-  }, 2500)
+  planPollCount = 0
+  planPoller.start()
 }
 
 function formatDuration(value) {
@@ -2606,10 +2606,10 @@ function formatDuration(value) {
 
 function normalizeError(error, fallbackMessage) {
   if (error instanceof APIError && error.message) {
-    return error.message
+    return sanitizeOperatorError(error.message, fallbackMessage)
   }
   if (error instanceof Error && error.message) {
-    return error.message
+    return sanitizeOperatorError(error.message, fallbackMessage)
   }
   return fallbackMessage
 }
@@ -2654,11 +2654,11 @@ watch(documentDetail, (value) => {
   }
   const building = hasCode(value.indexStatus, 2)
     || (hasCode(value.latestTaskType, 2) && ['1', '2'].includes(normalizeCode(value.latestTaskStatus)))
-  if (building && !buildPollTimer.value) {
+  if (building && !buildPoller.isActive()) {
     startBuildPolling()
     return
   }
-  if (!building && buildPollTimer.value) {
+  if (!building && buildPoller.isActive()) {
     clearBuildPolling()
   }
 })
@@ -2674,10 +2674,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  if (planPollTimer.value) {
-    window.clearInterval(planPollTimer.value)
-    planPollTimer.value = null
-  }
+  planPoller.clear()
   clearBuildPolling()
 })
 

@@ -17,7 +17,9 @@ public record AuthenticatedPrincipal(Long tenantId,
                                      String username,
                                      TokenAudience audience,
                                      Set<Long> roleIds,
-                                     Set<String> permissions) {
+                                     Set<String> permissions,
+                                     long tokenVersion,
+                                     String jti) {
 
     public AuthenticatedPrincipal {
         Objects.requireNonNull(tenantId, "tenantId");
@@ -26,6 +28,16 @@ public record AuthenticatedPrincipal(Long tenantId,
         Objects.requireNonNull(audience, "audience");
         roleIds = roleIds == null ? Set.of() : Set.copyOf(roleIds);
         permissions = permissions == null ? Set.of() : Set.copyOf(permissions);
+        tokenVersion = tokenVersion < 1 ? 1L : tokenVersion;
+    }
+
+    public AuthenticatedPrincipal(Long tenantId,
+                                  Long userId,
+                                  String username,
+                                  TokenAudience audience,
+                                  Set<Long> roleIds,
+                                  Set<String> permissions) {
+        this(tenantId, userId, username, audience, roleIds, permissions, 1L, null);
     }
 
     public boolean hasPermission(String permissionCode) {

@@ -9,6 +9,7 @@ import org.smartledge.ai.chatagent.rag.model.AnswerHistoryContext;
 import org.smartledge.ai.chatagent.rag.model.ConversationExecutionPlan;
 import org.smartledge.ai.chatagent.rag.model.EvidenceApplicabilityResult;
 import org.smartledge.ai.chatagent.rag.model.EvidenceIdentity;
+import org.smartledge.ai.chatagent.rag.model.EvidenceKind;
 import org.smartledge.ai.chatagent.rag.model.PromptReferenceDecision;
 import org.smartledge.ai.chatagent.rag.model.PromptReferenceDisposition;
 import org.smartledge.ai.chatagent.rag.model.PromptRenderedSourceEvidence;
@@ -251,7 +252,7 @@ public class RagPromptAssemblyService {
                 budgetOmitted = true;
             }
             if (contextBuilder.length() > 0) {
-                builder.append("【背景上下文 Context Only（只帮助理解，不能作为引用编号来源）】\n");
+                builder.append("【背景上下文 Context Only（无稳定 identity 的导航装饰，不可引用）】\n");
                 builder.append(contextBuilder);
             }
         }
@@ -382,18 +383,14 @@ public class RagPromptAssemblyService {
     }
 
     /**
-     * 是否为只能作为背景的 context-only 证据：依据结构化 identity 判定
-     * （citation 身份缺失 / CONTEXT_ONLY / RAPTOR summary-only / GraphRAG 社区 summary-only），
-     * 不做运行时关键词或文本推断。Web 证据可引用，永远算 source evidence。
+     * Context Only 只留给无稳定 identity 的装饰壳。SUMMARY/PARENT/TOOL/WEB 只要有 identity 就可引用。
      */
     private boolean isContextOnlyReference(SearchReference reference) {
         if (isWebReference(reference)) {
             return false;
         }
-        return reference.isContextOnly()
-            || "CONTEXT_ONLY".equalsIgnoreCase(StrUtil.blankToDefault(reference.getCitationEvidenceType(), ""))
-            || "SUMMARY_ONLY".equalsIgnoreCase(StrUtil.blankToDefault(reference.getRaptorSourceStatus(), ""))
-            || reference.isKgCommunitySummaryOnly();
+        return reference == null
+            || EvidenceIdentityResolver.isContextOnly(reference);
     }
 
     private boolean isGenerationVisibleSource(SearchReference reference) {
@@ -433,22 +430,19 @@ public class RagPromptAssemblyService {
 
     private String buildDocumentReferenceBlock(SearchReference reference) {
         String snippet = trimSnippet(reference.getSnippet(), 1100);
+        String kind = resolveEvidenceKindLabel(reference);
         if (isNotApplicable(reference)) {
             snippet = "【证据适用性】这条证据不适用于当前目标对象，只能作为相似但不适用的线索。原因："
                 + StrUtil.blankToDefault(reference.getEvidenceApplicabilityReason(), "-")
                 + "\n"
                 + snippet;
         }
-        if ("SUMMARY_ONLY".equalsIgnoreCase(StrUtil.blankToDefault(reference.getRaptorSourceStatus(), ""))) {
-            snippet = "【RAPTOR 摘要边界】这条证据只命中层级摘要，未下钻到 source chunk 或 ParentBlock；只能作为背景线索，不能单独支撑具体事实结论。\n"
-                + snippet;
-        }
-        if (reference.isKgCommunitySummaryOnly()) {
-            snippet = "【GraphRAG 社区摘要边界】这条证据只命中社区摘要，缺少可回到原文 quote 的 KG evidence；只能作为背景线索，不能单独支撑具体事实结论。\n"
-                + snippet;
+        if ("SUMMARY".equals(kind) && StrUtil.isBlank(reference.getQuoteText())) {
+            snippet = "【综述】没有原文 span，按综述引用，不要写成原文摘录。\n" + snippet;
         }
         return promptTemplateService.render(PromptTemplateNames.RAG_ANSWER_DOCUMENT_REFERENCE, Map.of(
             "referenceId", StrUtil.blankToDefault(reference.getReferenceId(), ""),
+            "evidenceKind", kind,
             "documentName", StrUtil.blankToDefault(
                 StrUtil.blankToDefault(reference.getDocumentName(), reference.getTitle()),
                 "文档来源"
@@ -460,14 +454,6 @@ public class RagPromptAssemblyService {
 
     private String buildContextBlock(SearchReference reference) {
         String snippet = trimSnippet(reference.getSnippet(), 1100);
-        if ("SUMMARY_ONLY".equalsIgnoreCase(StrUtil.blankToDefault(reference.getRaptorSourceStatus(), ""))) {
-            snippet = "【RAPTOR 摘要边界】这条证据只命中层级摘要，未下钻到 source chunk 或 ParentBlock；只能作为背景线索，不能单独支撑具体事实结论。\n"
-                + snippet;
-        }
-        if (reference.isKgCommunitySummaryOnly()) {
-            snippet = "【GraphRAG 社区摘要边界】这条证据只命中社区摘要，缺少可回到原文 quote 的 KG evidence；只能作为背景线索，不能单独支撑具体事实结论。\n"
-                + snippet;
-        }
         return promptTemplateService.render(PromptTemplateNames.RAG_ANSWER_CONTEXT, Map.of(
             "documentName", StrUtil.blankToDefault(
                 StrUtil.blankToDefault(reference.getDocumentName(), reference.getTitle()),
@@ -476,6 +462,16 @@ public class RagPromptAssemblyService {
             "sectionPath", StrUtil.blankToDefault(reference.getSectionPath(), "未识别"),
             "snippet", snippet
         )) + "\n\n";
+    }
+
+    private String resolveEvidenceKindLabel(SearchReference reference) {
+        String kind = StrUtil.blankToDefault(reference.getEvidenceKind(), "").trim().toUpperCase();
+        if (!kind.isBlank()) {
+            return kind;
+        }
+        EvidenceIdentity identity = EvidenceIdentityResolver.citationIdentity(reference);
+        EvidenceKind resolved = identity == null ? null : EvidenceKind.from(identity.type());
+        return resolved == null ? "CHUNK" : resolved.name();
     }
 
     private List<AnswerShapeRequirement> resolveAnswerShapeRequirements(

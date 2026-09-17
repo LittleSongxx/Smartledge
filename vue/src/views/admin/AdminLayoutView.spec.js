@@ -127,6 +127,29 @@ describe('B1 管理端菜单按能力渲染', () => {
     expect(nav.findAll('a')).toHaveLength(0)
   })
 
+  it('keeps the full console visible for a read-only portfolio reviewer', async () => {
+    signInAsAdmin([
+      'console:access',
+      'document:read',
+      'document:acl:manage',
+      'kb:read',
+      'observe:read',
+      'chat:use',
+      'user:manage',
+      'config:read',
+      'portfolio:demo'
+    ])
+
+    wrapper = mountLayout()
+    await flushPromises()
+
+    const text = wrapper.text()
+    ;['运营总览', '知识运行全景', '文档接入', '知识库管理', '文档授权', '知识路由', '路由追踪', '对话观测', '用户与角色', '参数配置']
+      .forEach((label) => expect(text, label).toContain(label))
+    expect(text).toContain('作品集试用')
+    expect(wrapper.get('[data-testid="portfolio-readonly-banner"]').text()).toContain('只读展示')
+  })
+
   it('offers the way back to the chat end from the console', async () => {
     signInAsAdmin(ADMIN_PERMISSIONS)
 

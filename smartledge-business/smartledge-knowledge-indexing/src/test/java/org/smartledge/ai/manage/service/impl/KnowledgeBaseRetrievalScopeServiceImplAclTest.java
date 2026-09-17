@@ -185,6 +185,15 @@ class KnowledgeBaseRetrievalScopeServiceImplAclTest {
         }
 
         @Override
+        public Set<Long> visibleDocumentIdsForIdentity(RequestIdentity identity) {
+            lastIdentity = identity;
+            if (failure != null) {
+                throw failure;
+            }
+            return visible;
+        }
+
+        @Override
         public Set<Long> writableDocumentIds(Collection<Long> documentIds, RequestIdentity identity) {
             return resolve(documentIds, identity);
         }
@@ -207,6 +216,11 @@ class KnowledgeBaseRetrievalScopeServiceImplAclTest {
 
         @Override
         public boolean revoke(Long documentId, String principalType, Long principalId, RequestIdentity identity) {
+            throw new UnsupportedOperationException("门禁不改 ACL");
+        }
+
+        @Override
+        public int revokeAllForDocument(Long documentId, RequestIdentity identity) {
             throw new UnsupportedOperationException("门禁不改 ACL");
         }
 

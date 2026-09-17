@@ -21,9 +21,14 @@ import org.mockito.quality.Strictness;
 import java.util.List;
 import java.util.Set;
 
+import org.smartledge.exception.SuperAgentFrameException;
+import org.springframework.dao.DuplicateKeyException;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -136,17 +141,37 @@ class MybatisDocumentAclStoreWritePathTest {
     }
 
     @Test
-    @DisplayName("缺少身份或入参时不构造任何语句（fail closed）")
-    void ignoresIncompleteWrites() {
-        store.grant(DOCUMENT_ID, null, SuperAgentDocumentAcl.PRINCIPAL_TYPE_USER, 1L,
-            SuperAgentDocumentAcl.PERMISSION_READ, 1L);
-        store.grant(DOCUMENT_ID, identity, SuperAgentDocumentAcl.PRINCIPAL_TYPE_USER, null,
-            SuperAgentDocumentAcl.PERMISSION_READ, 1L);
+    @DisplayName("缺少身份或入参时授予抛错，调用方能知道失败")
+    void rejectsIncompleteWrites() {
+        assertThatThrownBy(() -> store.grant(DOCUMENT_ID, null, SuperAgentDocumentAcl.PRINCIPAL_TYPE_USER, 1L,
+            SuperAgentDocumentAcl.PERMISSION_READ, 1L))
+            .isInstanceOf(SuperAgentFrameException.class)
+            .hasMessageContaining("授权参数不完整");
+        assertThatThrownBy(() -> store.grant(DOCUMENT_ID, identity, SuperAgentDocumentAcl.PRINCIPAL_TYPE_USER, null,
+            SuperAgentDocumentAcl.PERMISSION_READ, 1L))
+            .isInstanceOf(SuperAgentFrameException.class)
+            .hasMessageContaining("授权参数不完整");
 
         assertThat(store.revoke(DOCUMENT_ID, null, 1L, identity)).isFalse();
         assertThat(store.listByDocument(DOCUMENT_ID, null)).isEmpty();
         verify(documentAclMapper, never()).insert(any(SuperAgentDocumentAcl.class));
         verify(documentAclMapper, never()).update(any(), any(Wrapper.class));
         verify(documentAclMapper, never()).selectList(any(LambdaQueryWrapper.class));
+    }
+
+    @Test
+    @DisplayName("唯一键冲突时升级为更新，而不是静默失败")
+    void uniqueKeyConflictRetriesAsUpdate() {
+        when(documentAclMapper.selectOne(any())).thenReturn(null, existingRow(0));
+        when(documentAclMapper.insert(any(SuperAgentDocumentAcl.class)))
+            .thenThrow(new DuplicateKeyException("uk_document_acl"));
+        when(uidGenerator.getUid()).thenReturn(8002L);
+
+        store.grant(DOCUMENT_ID, identity, SuperAgentDocumentAcl.PRINCIPAL_TYPE_ROLE, ROLE_ID,
+            SuperAgentDocumentAcl.PERMISSION_WRITE, 1L);
+
+        verify(documentAclMapper).insert(any(SuperAgentDocumentAcl.class));
+        verify(documentAclMapper).update(any(), any(Wrapper.class));
+        verify(documentAclMapper, times(2)).selectOne(any());
     }
 }

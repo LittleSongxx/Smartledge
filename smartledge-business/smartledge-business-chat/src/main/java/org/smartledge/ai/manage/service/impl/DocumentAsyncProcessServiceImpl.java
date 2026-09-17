@@ -358,6 +358,7 @@ public class DocumentAsyncProcessServiceImpl implements DocumentAsyncProcessServ
             long strategyPersistStartedNanos = System.nanoTime();
             SuperAgentDocumentStrategyPlan plan = new SuperAgentDocumentStrategyPlan();
             plan.setId(planId);
+            plan.setTenantId(documentTenantId);
             plan.setDocumentId(documentId);
             plan.setPlanVersion(planVersion);
             plan.setPlanSource(DocumentPlanSourceEnum.SYSTEM_RECOMMEND.getCode());
@@ -367,12 +368,13 @@ public class DocumentAsyncProcessServiceImpl implements DocumentAsyncProcessServ
             plan.setChunkingContractJson(planDraft.getChunkingContractJson());
             plan.setRecommendReason(planDraft.getRecommendReason());
             plan.setStatus(BusinessStatus.YES.getCode());
-            planMapper.insert(plan);
+            DerivedRowTenantScope.runPerDocument(documentTenantId, () -> planMapper.insert(plan));
 
             for (int index = 0; index < planDraft.getParentSteps().size(); index++) {
                 DocumentStrategyStepDraft draft = planDraft.getParentSteps().get(index);
                 SuperAgentDocumentStrategyStep step = new SuperAgentDocumentStrategyStep();
                 step.setId(uidGenerator.getUid());
+                step.setTenantId(documentTenantId);
                 step.setPlanId(planId);
                 step.setDocumentId(documentId);
                 step.setPipelineType(draft.getPipelineType());
@@ -383,12 +385,13 @@ public class DocumentAsyncProcessServiceImpl implements DocumentAsyncProcessServ
                 step.setExecuteStatus(DocumentStrategyExecuteStatusEnum.WAIT_EXECUTE.getCode());
                 step.setRecommendReason(draft.getRecommendReason());
                 step.setStatus(BusinessStatus.YES.getCode());
-                stepMapper.insert(step);
+                DerivedRowTenantScope.runPerDocument(documentTenantId, () -> stepMapper.insert(step));
             }
             for (int index = 0; index < planDraft.getChildSteps().size(); index++) {
                 DocumentStrategyStepDraft draft = planDraft.getChildSteps().get(index);
                 SuperAgentDocumentStrategyStep step = new SuperAgentDocumentStrategyStep();
                 step.setId(uidGenerator.getUid());
+                step.setTenantId(documentTenantId);
                 step.setPlanId(planId);
                 step.setDocumentId(documentId);
                 step.setPipelineType(draft.getPipelineType());
@@ -399,7 +402,7 @@ public class DocumentAsyncProcessServiceImpl implements DocumentAsyncProcessServ
                 step.setExecuteStatus(DocumentStrategyExecuteStatusEnum.WAIT_EXECUTE.getCode());
                 step.setRecommendReason(draft.getRecommendReason());
                 step.setStatus(BusinessStatus.YES.getCode());
-                stepMapper.insert(step);
+                DerivedRowTenantScope.runPerDocument(documentTenantId, () -> stepMapper.insert(step));
             }
             long strategyPersistCostMillis = elapsedMillis(strategyPersistStartedNanos);
             log.info(
@@ -937,6 +940,11 @@ public class DocumentAsyncProcessServiceImpl implements DocumentAsyncProcessServ
             document.setIndexStatus(DocumentIndexStatusEnum.BUILD_SUCCESS.getCode());
             document.setLastIndexTaskId(taskId);
             documentMapper.updateById(document);
+            vectorGateway.tombstoneStaleTasks(documentId, taskId);
+            DocumentKeywordSearchGateway keywordSearchGateway = keywordSearchGatewayProvider.getIfAvailable();
+            if (keywordSearchGateway != null) {
+                keywordSearchGateway.tombstoneStaleTasks(documentId, taskId);
+            }
 
             finishTaskSuccess(task, DocumentTaskStageEnum.STORE_COMPLETE.getCode(), startTime);
             progressCacheService.update(document, task);

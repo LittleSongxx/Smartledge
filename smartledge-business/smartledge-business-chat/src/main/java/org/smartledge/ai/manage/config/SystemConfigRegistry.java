@@ -42,11 +42,8 @@ public class SystemConfigRegistry {
                         "秒", RESTART_REQUIRED, o -> o.getMvcAsync().getShutdownAwaitSeconds(),
                         (o, v) -> o.getMvcAsync().setShutdownAwaitSeconds((Integer) v)),
 
-                // 账号与口令不再走系统参数：B3 起凭据只存在于 smartledge_user（BCrypt 哈希），
-                // 系统参数里既没有可读的明文口令，也没有可写的口令入口。
-                secretText("adminAuth.tokenSecret", "adminAuth", "令牌签名密钥", "登录令牌签名密钥；轮换后旧令牌失效。", 512,
-                        RESTART_REQUIRED, o -> o.getAdminAuth().getTokenSecret(),
-                        (o, v) -> o.getAdminAuth().setTokenSecret((String) v)),
+                // 签名密钥不再走系统参数：持 config:write 的租户管理员不能改 JWT 密钥。
+                // 密钥只来自 app.admin-auth.token-secret / SMARTLEDGE_ADMIN_TOKEN_SECRET。
                 longInteger("adminAuth.tokenExpireMinutes", "adminAuth", "令牌有效期", "后台登录令牌有效期，单位分钟。", 1, 10080,
                         "分钟", RESTART_REQUIRED, o -> o.getAdminAuth().getTokenExpireMinutes(),
                         (o, v) -> o.getAdminAuth().setTokenExpireMinutes((Long) v)),
@@ -354,10 +351,10 @@ public class SystemConfigRegistry {
                         "字符", NEW_CONVERSATION, o -> o.getRag().getHistorySummary().getSummaryMaxChars(),
                         (o, v) -> o.getRag().getHistorySummary().setSummaryMaxChars((Integer) v)),
 
-                integer("rag.raptorMaxClusterSize", "raptorBuild", "RAPTOR 簇节点上限", "每个摘要簇最多包含的下层节点数量。", 2, 50, "个",
+                integer("rag.raptorMaxClusterSize", "raptorBuild", "RAPTOR 簇节点上限", "每个摘要簇最多包含的下层节点数量。与算法工具箱同一权威：2–50，越界拒绝，不静默收缩。", 2, 50, "个",
                         NEW_BUILD_TASK, o -> o.getRag().getRaptorMaxClusterSize(),
                         (o, v) -> o.getRag().setRaptorMaxClusterSize((Integer) v)),
-                integer("rag.raptorMaxLevels", "raptorBuild", "RAPTOR 摘要层数", "摘要树最多生成的层数。", 1, 8, "层", NEW_BUILD_TASK,
+                integer("rag.raptorMaxLevels", "raptorBuild", "RAPTOR 摘要层数", "摘要树最多生成的层数。与算法工具箱同一权威：1–8，越界拒绝，不静默收缩。", 1, 8, "层", NEW_BUILD_TASK,
                         o -> o.getRag().getRaptorMaxLevels(), (o, v) -> o.getRag().setRaptorMaxLevels((Integer) v)),
                 bool("rag.raptorLlmSummaryEnabled", "raptorBuild", "启用 RAPTOR LLM 摘要",
                         "允许 Python rag-tools 在构建阶段尝试模型摘要。", NEW_BUILD_TASK, o -> o.getRag().isRaptorLlmSummaryEnabled(),
@@ -685,13 +682,12 @@ public class SystemConfigRegistry {
                     "单子问题证据预算必须小于或等于总证据预算。",
                     List.of("降低单子问题证据预算，或在确认总 Prompt 预算后提高总证据预算。"));
         }
-        if (snapshot.getAdminAuth().getTokenSecret() == null || snapshot.getAdminAuth().getTokenSecret().isBlank()
-                || snapshot.getAdminAuth().getTokenExpireMinutes() < 1) {
+        if (snapshot.getAdminAuth().getTokenExpireMinutes() < 1) {
             throw relationFailure("ADMIN_AUTH_CONFIGURATION_INCOMPLETE",
-                    "令牌签名配置不完整。", snapshot,
-                    List.of("adminAuth.tokenSecret", "adminAuth.tokenExpireMinutes"),
-                    "令牌签名密钥和正数有效期都必须存在。",
-                    List.of("补齐缺失的认证参数；令牌密钥只显示配置状态，不要粘贴到日志或工单。"));
+                    "令牌有效期配置不完整。", snapshot,
+                    List.of("adminAuth.tokenExpireMinutes"),
+                    "令牌有效期必须是正数分钟。",
+                    List.of("补齐令牌有效期；签名密钥已移出租户可写系统参数，请改环境变量。"));
         }
         if (snapshot.getRagTools().getConnectTimeoutMs() <= 0) {
             throw relationFailure("RAG_TOOLS_CONNECT_TIMEOUT_INVALID",

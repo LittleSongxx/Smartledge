@@ -31,8 +31,6 @@ import java.util.Set;
 /** The single Source-only final evidence selection authority. */
 public final class FinalEvidenceSelectionPolicy {
 
-    private static final double SCORE_EPSILON = 1e-9D;
-
     private final EvidenceApplicabilityService applicabilityService;
 
     public FinalEvidenceSelectionPolicy(EvidenceApplicabilityService applicabilityService) {
@@ -52,17 +50,10 @@ public final class FinalEvidenceSelectionPolicy {
             if (!candidate.quality().citationCapable()) {
                 decisions.put(index, candidate.decision(Disposition.FILTERED, Reason.FILTERED_NOT_CITATION_CAPABLE, null));
             }
-            else if (!candidate.applicability().isApplicable()) {
-                decisions.put(index, candidate.decision(Disposition.FILTERED, Reason.FILTERED_NOT_APPLICABLE, null));
-            }
         }
 
         List<EvaluatedCandidate> representatives = deduplicateEligibleCandidates(evaluated, decisions);
-        List<EvaluatedCandidate> selected = selectWithinBudget(
-            representatives,
-            budget,
-            plan != null && plan.isAutomaticDocumentScope()
-        );
+        List<EvaluatedCandidate> selected = selectTopK(representatives, budget);
         Map<Integer, Integer> finalRanks = new LinkedHashMap<>();
         for (int index = 0; index < selected.size(); index++) {
             finalRanks.put(selected.get(index).inputIndex(), index + 1);
@@ -73,9 +64,7 @@ public final class FinalEvidenceSelectionPolicy {
                 ? candidate.decision(Disposition.FILTERED, Reason.FILTERED_BY_FINAL_EVIDENCE_BUDGET, null)
                 : candidate.decision(
                     Disposition.SELECTED,
-                    candidate.structureNavigationRequired()
-                        ? Reason.INCLUDED_BY_STRUCTURE_NAVIGATION_REQUIREMENT
-                        : Reason.INCLUDED_BY_FINAL_EVIDENCE_POLICY,
+                    Reason.INCLUDED_BY_FINAL_EVIDENCE_POLICY,
                     finalRank
                 ));
         }
@@ -112,7 +101,6 @@ public final class FinalEvidenceSelectionPolicy {
             score.source(),
             score.provenance(),
             policyScore,
-            isStructureNavigationRequiredSource(document),
             quality,
             applicability
         );
@@ -202,10 +190,7 @@ public final class FinalEvidenceSelectionPolicy {
         }
 
         List<EvaluatedCandidate> representatives = new ArrayList<>(candidatesByIdentity.size());
-        Comparator<EvaluatedCandidate> priority = Comparator
-            .comparingInt((EvaluatedCandidate candidate) -> candidate.structureNavigationRequired() ? 0 : 1)
-            .thenComparing(Comparator.comparingDouble(EvaluatedCandidate::policyScore).reversed())
-            .thenComparingInt(EvaluatedCandidate::inputIndex);
+        Comparator<EvaluatedCandidate> priority = Comparator.comparingInt(EvaluatedCandidate::inputIndex);
         for (List<EvaluatedCandidate> duplicates : candidatesByIdentity.values()) {
             EvaluatedCandidate representative = duplicates.stream().min(priority).orElseThrow();
             representatives.add(representative);
@@ -222,115 +207,14 @@ public final class FinalEvidenceSelectionPolicy {
         return representatives;
     }
 
-    private List<EvaluatedCandidate> selectWithinBudget(List<EvaluatedCandidate> candidates,
-                                                        int budget,
-                                                        boolean balanceDocuments) {
+    private List<EvaluatedCandidate> selectTopK(List<EvaluatedCandidate> candidates, int budget) {
         if (budget <= 0 || candidates.isEmpty()) {
             return List.of();
         }
-        List<EvaluatedCandidate> selected = new ArrayList<>(Math.min(budget, candidates.size()));
-        List<EvaluatedCandidate> remaining = new ArrayList<>(candidates.size());
-        Map<Long, Integer> selectedDocumentCounts = new LinkedHashMap<>();
-        Map<String, Integer> selectedSourceFamilyCounts = new LinkedHashMap<>();
-        Set<String> requiredStructureSections = new LinkedHashSet<>();
-        for (EvaluatedCandidate candidate : candidates) {
-            if (candidate.structureNavigationRequired() && selected.size() < budget) {
-                selected.add(candidate);
-                recordCoverage(candidate, selectedDocumentCounts, selectedSourceFamilyCounts);
-                requiredStructureSections.addAll(candidate.structureSectionIdentities());
-            }
-            else {
-                remaining.add(candidate);
-            }
-        }
-        while (selected.size() < budget && !remaining.isEmpty()) {
-            int bestStructureCoverage = remaining.stream()
-                .mapToInt(candidate -> structureCoveragePriority(candidate, requiredStructureSections))
-                .min()
-                .orElse(1);
-            List<EvaluatedCandidate> structureCovered = remaining.stream()
-                .filter(candidate -> structureCoveragePriority(candidate, requiredStructureSections)
-                    == bestStructureCoverage)
-                .toList();
-            int bestSourceFamilyCoverage = structureCovered.stream()
-                .mapToInt(candidate -> sourceFamilyCount(candidate, selectedSourceFamilyCounts))
-                .min()
-                .orElse(0);
-            List<EvaluatedCandidate> sourceFamilyCovered = structureCovered.stream()
-                .filter(candidate -> sourceFamilyCount(candidate, selectedSourceFamilyCounts)
-                    == bestSourceFamilyCoverage)
-                .toList();
-            double highestPriority = sourceFamilyCovered.stream()
-                .mapToDouble(EvaluatedCandidate::policyScore)
-                .max()
-                .orElse(Double.NEGATIVE_INFINITY);
-            List<EvaluatedCandidate> highestPriorityCandidates = sourceFamilyCovered.stream()
-                .filter(candidate -> Math.abs(candidate.policyScore() - highestPriority) <= SCORE_EPSILON)
-                .toList();
-            int bestDocumentCoverage = balanceDocuments
-                ? highestPriorityCandidates.stream()
-                    .mapToInt(candidate -> diversityCount(candidate, selectedDocumentCounts))
-                    .min()
-                    .orElse(0)
-                : 0;
-            List<EvaluatedCandidate> documentCovered = highestPriorityCandidates.stream()
-                .filter(candidate -> !balanceDocuments
-                    || diversityCount(candidate, selectedDocumentCounts) == bestDocumentCoverage)
-                .toList();
-            EvaluatedCandidate next = documentCovered.stream()
-                .min(Comparator.comparingInt(EvaluatedCandidate::inputIndex))
-                .orElseThrow();
-            selected.add(next);
-            remaining.remove(next);
-            recordCoverage(next, selectedDocumentCounts, selectedSourceFamilyCounts);
-        }
-        return selected;
-    }
-
-    private int structureCoveragePriority(EvaluatedCandidate candidate, Set<String> requiredStructureSections) {
-        return candidate == null || candidate.structureSectionIdentities().isEmpty()
-            || candidate.structureSectionIdentities().stream().noneMatch(requiredStructureSections::contains)
-            ? 1
-            : 0;
-    }
-
-    private int sourceFamilyCount(EvaluatedCandidate candidate, Map<String, Integer> selectedSourceFamilyCounts) {
-        if (candidate == null || candidate.sourceFamilyIdentity().isBlank()) {
-            return 0;
-        }
-        return selectedSourceFamilyCounts.getOrDefault(candidate.sourceFamilyIdentity(), 0);
-    }
-
-    private void recordCoverage(EvaluatedCandidate candidate,
-                                Map<Long, Integer> selectedDocumentCounts,
-                                Map<String, Integer> selectedSourceFamilyCounts) {
-        if (candidate.documentId() != null) {
-            selectedDocumentCounts.merge(candidate.documentId(), 1, Integer::sum);
-        }
-        if (!candidate.sourceFamilyIdentity().isBlank()) {
-            selectedSourceFamilyCounts.merge(candidate.sourceFamilyIdentity(), 1, Integer::sum);
-        }
-    }
-
-    private boolean isStructureNavigationRequiredSource(RetrievalDocument document) {
-        if (document == null || document.getMetadata() == null
-            || !booleanMetadata(document, DocumentKnowledgeMetadataKeys.STRUCTURE_NAVIGATION_REQUIRED_SOURCE)) {
-            return false;
-        }
-        String chunkType = String.valueOf(document.getMetadata()
-            .getOrDefault(DocumentKnowledgeMetadataKeys.CHUNK_TYPE, ""));
-        return "TITLE".equalsIgnoreCase(chunkType)
-            && booleanMetadata(document, DocumentKnowledgeMetadataKeys.SOURCE_AUTHORED_HEADING)
-            && EvidenceIdentityResolver.isCitationCapable(document);
-    }
-
-    private boolean booleanMetadata(RetrievalDocument document, String key) {
-        Object value = document.getMetadata().get(key);
-        return value instanceof Boolean flag ? flag : Boolean.parseBoolean(String.valueOf(value));
-    }
-
-    private int diversityCount(EvaluatedCandidate candidate, Map<Long, Integer> selectedDocumentCounts) {
-        return candidate.documentId() == null ? 0 : selectedDocumentCounts.getOrDefault(candidate.documentId(), 0);
+        return candidates.stream()
+            .sorted(Comparator.comparingInt(EvaluatedCandidate::inputIndex))
+            .limit(budget)
+            .toList();
     }
 
     private Double number(Object value) {
@@ -439,7 +323,6 @@ public final class FinalEvidenceSelectionPolicy {
         ScoreSource scoreSource,
         ScoreProvenance scoreProvenance,
         double policyScore,
-        boolean structureNavigationRequired,
         EvidenceQualityFeatures quality,
         EvidenceApplicabilityResult applicability
     ) {

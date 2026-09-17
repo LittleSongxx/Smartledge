@@ -73,6 +73,7 @@ public final class DocumentKnowledgeMetadataKeys {
     public static final String CONTEXT_IDENTITY = "contextIdentity";
     public static final String CITATION_IDENTITY = "citationIdentity";
     public static final String CITATION_EVIDENCE_TYPE = "citationEvidenceType";
+    public static final String EVIDENCE_KIND = "evidenceKind";
     public static final String CONTEXT_ONLY = "contextOnly";
     public static final String SOURCE_EVIDENCE_RESOLVED = "sourceEvidenceResolved";
     public static final String EVIDENCE_SOURCE_CAPABILITY = "evidenceSourceCapability";

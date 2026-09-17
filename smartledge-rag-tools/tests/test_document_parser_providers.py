@@ -16,10 +16,12 @@ class AliyunDocMindDocumentParserTest(unittest.TestCase):
         status = document_parser.document_parser_status()
 
         self.assertEqual("type_routed", status["defaultProvider"])
-        self.assertEqual(2, len(status["providers"]))
+        self.assertEqual(3, len(status["providers"]))
         providers = {provider["providerName"]: provider for provider in status["providers"]}
         self.assertIn("native_text", providers)
         self.assertIn("aliyun_docmind", providers)
+        self.assertIn("docling", providers)
+        self.assertIn("pdf", providers["docling"]["supportedFileTypes"])
         self.assertIn("md", providers["native_text"]["supportedFileTypes"])
         self.assertIn("txt", providers["native_text"]["supportedFileTypes"])
         self.assertIn("html", providers["native_text"]["supportedFileTypes"])

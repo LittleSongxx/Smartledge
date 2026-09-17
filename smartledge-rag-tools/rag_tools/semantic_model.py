@@ -51,6 +51,7 @@ def semantic_model_status() -> dict[str, object]:
         "sentenceTransformersAvailable": importlib.util.find_spec("sentence_transformers") is not None,
         "rerankProvider": _rerank_provider(),
         "rerankModel": rerank_model_name(),
+        "embeddingProvider": _embedding_provider(),
         "embeddingModel": _embedding_model_name(),
         "loadedModels": sorted(_models.keys()),
         "rerankResilience": {
@@ -162,6 +163,8 @@ def _scores_from_rerank_body(body: dict, size: int) -> list[float]:
 def embed_texts(texts: list[str]) -> list[list[float]]:
     if not texts:
         return []
+    if _embedding_provider() == PROVIDER_OPENAI_COMPATIBLE:
+        return _openai_compatible_embeddings(texts)
     model_name = _embedding_model_name()
     model = _load_embedding_model(model_name)
     try:
@@ -169,6 +172,132 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     except Exception as exception:
         raise SemanticModelUnavailable(f"语义向量模型推理失败: {exception}") from exception
     return [list(map(float, vector)) for vector in vectors]
+
+
+PROVIDER_OPENAI_COMPATIBLE = "openai-compatible"
+DEFAULT_EMBEDDING_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/"
+DEFAULT_EMBEDDING_PATH = "v1/embeddings"
+
+
+def _embedding_provider() -> str:
+    provider = config_value(
+        "ragTools.embedding.provider",
+        "RAG_TOOLS_EMBEDDING_PROVIDER",
+        os.getenv("SMARTLEDGE_EMBEDDING_PROVIDER", "local"),
+    ).strip().lower()
+    if provider in {PROVIDER_OPENAI_COMPATIBLE, PROVIDER_DASHSCOPE, "cloud"}:
+        return PROVIDER_OPENAI_COMPATIBLE
+    return "local"
+
+
+def _openai_compatible_embeddings(texts: list[str]) -> list[list[float]]:
+    """与 Java ModelHttpClient 同一条 openai-compatible embeddings 契约。
+
+    RAPTOR 聚类只需要向量，不需要本地 sentence-transformers。云端模式下
+    缺少该依赖时必须走这条路径，否则 /raptor/build 会 503。
+    """
+    api_key = _embedding_api_key()
+    if not api_key:
+        raise SemanticModelUnavailable(
+            "embedding provider=openai-compatible 需要 API Key：请配置 "
+            "SMARTLEDGE_EMBEDDING_API_KEY 或 ALI_BAI_LIAN_API_KEY。"
+        )
+    url = _embedding_url()
+    payload = {"model": _embedding_model_name(), "input": [text or "" for text in texts]}
+    dimensions = _embedding_dimensions()
+    if dimensions > 0:
+        payload["dimensions"] = dimensions
+    attempts = _rerank_max_attempts()
+    backoff = _rerank_backoff()
+    last_error = ""
+    with _rerank_concurrency_slot():
+        for attempt in range(1, attempts + 1):
+            try:
+                body = _post_json(url, payload, api_key, _dashscope_timeout())
+                return _vectors_from_embedding_body(body, len(texts), dimensions)
+            except SemanticModelUnavailable:
+                raise
+            except _RetryableCloudError as failure:
+                last_error = str(failure)
+                if attempt >= attempts:
+                    break
+                delay = backoff * (2 ** (attempt - 1)) + random.uniform(0, backoff * 0.25)
+                time.sleep(delay)
+            except Exception as failure:  # noqa: BLE001 - 网络/解析等一律按可重试处理
+                last_error = str(failure)
+                if attempt >= attempts:
+                    break
+                delay = backoff * (2 ** (attempt - 1)) + random.uniform(0, backoff * 0.25)
+                time.sleep(delay)
+    raise SemanticModelUnavailable(f"云端向量化失败（已尝试 {attempts} 次）: {last_error}")
+
+
+def _vectors_from_embedding_body(body: dict, size: int, expected_dimensions: int) -> list[list[float]]:
+    rows = list(body.get("data") or [])
+    vectors: list[list[float] | None] = [None] * size
+    for item in rows:
+        try:
+            index = int(item.get("index"))
+            raw = item.get("embedding") or []
+            vector = [float(value) for value in raw]
+        except (TypeError, ValueError) as exception:
+            raise SemanticModelUnavailable(f"云端向量响应无法解析: {exception}") from exception
+        if index < 0 or index >= size:
+            continue
+        if expected_dimensions > 0 and len(vector) != expected_dimensions:
+            raise SemanticModelUnavailable(
+                f"云端向量维度不匹配: expected={expected_dimensions}, actual={len(vector)}"
+            )
+        vectors[index] = vector
+    if any(item is None for item in vectors):
+        raise SemanticModelUnavailable("云端向量响应条数与输入不一致。")
+    return l2_normalize_vectors([item for item in vectors if item is not None])
+
+
+def l2_normalize_vectors(vectors: list[list[float]]) -> list[list[float]]:
+    normalized: list[list[float]] = []
+    for vector in vectors:
+        norm = math.sqrt(sum(value * value for value in vector))
+        if norm <= 0:
+            normalized.append(list(vector))
+        else:
+            normalized.append([value / norm for value in vector])
+    return normalized
+
+
+def _embedding_api_key() -> str:
+    configured = config_value(
+        "ragTools.embedding.apiKey",
+        "SMARTLEDGE_EMBEDDING_API_KEY",
+        "",
+    ).strip()
+    return configured or _dashscope_api_key()
+
+
+def _embedding_url() -> str:
+    base = config_value(
+        "ragTools.embedding.baseUrl",
+        "SMARTLEDGE_EMBEDDING_BASE_URL",
+        DEFAULT_EMBEDDING_BASE_URL,
+    ).strip()
+    path = config_value(
+        "ragTools.embedding.path",
+        "SMARTLEDGE_EMBEDDING_PATH",
+        DEFAULT_EMBEDDING_PATH,
+    ).strip()
+    if not base.endswith("/"):
+        base = base + "/"
+    return base + path.lstrip("/")
+
+
+def _embedding_dimensions() -> int:
+    return config_int(
+        "ragTools.embedding.dimensions",
+        "SMARTLEDGE_EMBEDDING_DIMENSIONS",
+        DEFAULT_EMBEDDING_DIMENSIONS,
+        0,
+        4096,
+    )
 
 
 def _score_pairs(model_name: str, pairs: list[tuple[str, str]]) -> list[float]:
@@ -300,4 +429,8 @@ def _rerank_model_name() -> str:
 
 
 def _embedding_model_name() -> str:
+    if _embedding_provider() == PROVIDER_OPENAI_COMPATIBLE:
+        cloud_name = os.getenv("SMARTLEDGE_EMBEDDING_MODEL", "").strip()
+        if cloud_name:
+            return cloud_name
     return os.getenv("RAG_TOOLS_EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL).strip()

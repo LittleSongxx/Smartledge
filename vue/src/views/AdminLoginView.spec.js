@@ -32,8 +32,11 @@ describe('F05 admin login behavior', () => {
     const username = wrapper.get('#login-username')
     const password = wrapper.get('#login-password')
 
-    expect(username.element.value).toBe('admin')
-    expect(password.element.value).toBe('admin123456')
+    expect(username.element.value).toBe('reviewer')
+    expect(password.element.value).toBe('Look-Review-2026')
+    expect(wrapper.text()).not.toContain('admin123456')
+    expect(wrapper.text()).not.toContain('租户编码')
+    expect(wrapper.find('#login-tenant').exists()).toBe(false)
     expect(password.attributes('type')).toBe('password')
 
     await wrapper.get('button[aria-label="显示密码"]').trigger('click')
@@ -47,15 +50,6 @@ describe('F05 admin login behavior', () => {
     expect(mocks.login).toHaveBeenCalledWith({ username: 'operator', password: 'secret' })
     expect(mocks.saveAdminAuth).toHaveBeenCalledWith({ username: 'operator', token: 'signed-token' })
     expect(mocks.replace).toHaveBeenCalledWith('/admin/documents?keyword=policy')
-  })
-
-  it('passes the tenant code only when it is filled (S22: 租户 B 管理员登录)', async () => {
-    const wrapper = mount(AdminLoginView)
-    await wrapper.get('#login-tenant').setValue(' demo-b ')
-    await wrapper.get('form').trigger('submit')
-    await flushPromises()
-
-    expect(mocks.login).toHaveBeenCalledWith({ username: 'admin', password: 'admin123456', tenantCode: 'demo-b' })
   })
 
   it('reports required fields without issuing a request', async () => {

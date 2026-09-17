@@ -2,6 +2,7 @@ package org.smartledge.ai.chatagent.rag.support;
 
 import org.smartledge.ai.chatagent.model.SearchReference;
 import org.smartledge.ai.chatagent.rag.model.EvidenceIdentity;
+import org.smartledge.ai.chatagent.rag.model.EvidenceKind;
 import org.smartledge.ai.rag.runtime.support.DocumentKnowledgeMetadataKeys;
 import org.smartledge.ai.rag.runtime.model.RetrievalDocument;
 
@@ -138,11 +139,14 @@ public final class SearchReferenceMapper {
         if (citationIdentity != null && citationIdentity.present()) {
             reference.setCitationIdentity(citationIdentity.value());
             reference.setCitationEvidenceType(citationIdentity.type().name());
+            EvidenceKind kind = EvidenceKind.from(citationIdentity.type());
+            reference.setEvidenceKind(kind == null ? "" : kind.name());
             reference.setSourceEvidenceResolved(true);
             reference.setContextOnly(false);
         }
         else {
             reference.setCitationEvidenceType("CONTEXT_ONLY");
+            reference.setEvidenceKind("");
             reference.setSourceEvidenceResolved(false);
             reference.setContextOnly(true);
         }

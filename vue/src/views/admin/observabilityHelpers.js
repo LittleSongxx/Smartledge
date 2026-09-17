@@ -1520,12 +1520,20 @@ export function buildExplicitCitationView(stageTraces, references) {
   const snapshot = findStageSnapshot(stageTraces, 'CITATION_BINDING')
   const explicitCitationIdentities = snapshotList(snapshot || {}, 'explicitCitationIdentities')
   const sourceSnapshotIdentities = snapshotList(snapshot || {}, 'sourceSnapshotIdentities')
+  const retrievedSourceIdentities = snapshotList(snapshot || {}, 'retrievedSourceIdentities')
   const renderedSourceIdentities = snapshotList(snapshot || {}, 'renderedSourceIdentities')
   const bindings = snapshotList(snapshot || {}, 'bindings')
   const rejectedTokens = snapshotList(snapshot || {}, 'rejectedTokens')
-  const finalReferences = asList(references).map((reference, index) => normalizeExplicitReference(
-    reference,
-    explicitCitationIdentities[index] || sourceSnapshotIdentities[index],
+  const referenceByIdentity = new Map()
+  asList(references).forEach((reference) => {
+    const identity = reference?.citationIdentity || reference?.identity || ''
+    if (identity && !referenceByIdentity.has(identity)) {
+      referenceByIdentity.set(identity, reference)
+    }
+  })
+  const finalReferences = explicitCitationIdentities.map((identity, index) => normalizeExplicitReference(
+    referenceByIdentity.get(identity) || {},
+    identity,
     index
   ))
 
@@ -1536,12 +1544,14 @@ export function buildExplicitCitationView(stageTraces, references) {
     conservationStatus: snapshotValue(snapshot || {}, 'conservationStatus') || '',
     explicitCitationIdentities,
     sourceSnapshotIdentities,
+    retrievedSourceIdentities,
     renderedSourceIdentities,
     bindings,
     rejectedTokens,
     finalReferences,
     summary: {
       renderedSourceCount: renderedSourceIdentities.length,
+      retrievedSourceCount: retrievedSourceIdentities.length || renderedSourceIdentities.length,
       parsedTokenCount: firstPresent(snapshotValue(snapshot || {}, 'parsedTokenCount'), 0),
       bindingCount: firstPresent(snapshotValue(snapshot || {}, 'bindingCount'), bindings.length),
       rejectedTokenCount: firstPresent(snapshotValue(snapshot || {}, 'rejectedTokenCount'), rejectedTokens.length),
@@ -1764,15 +1774,21 @@ export function buildTraceStageInspector(stageTrace, exchange) {
       pushPair(summaryItems, '解析 token 数', bindingView.summary.parsedTokenCount)
       pushPair(summaryItems, '合法绑定数', bindingView.summary.bindingCount)
       pushPair(summaryItems, '拒绝 token 数', bindingView.summary.rejectedTokenCount)
+      pushPair(summaryItems, '检索来源数', bindingView.summary.retrievedSourceCount)
       pushPair(summaryItems, '最终引用数', bindingView.summary.finalReferenceCount)
       pushPair(summaryItems, '守恒状态', bindingView.conservationStatus)
+      listSections.push({
+        label: '检索来源 identities',
+        items: bindingView.retrievedSourceIdentities,
+        ordered: true
+      })
       listSections.push({
         label: '显式引用 identities',
         items: bindingView.explicitCitationIdentities,
         ordered: true
       })
       listSections.push({
-        label: 'Source snapshot identities',
+        label: 'Source snapshot identities（过渡期=explicit）',
         items: bindingView.sourceSnapshotIdentities,
         ordered: true
       })

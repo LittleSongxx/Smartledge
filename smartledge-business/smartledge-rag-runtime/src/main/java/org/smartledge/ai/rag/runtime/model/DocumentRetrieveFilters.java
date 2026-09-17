@@ -37,12 +37,16 @@ public class DocumentRetrieveFilters {
     @Builder.Default
     private List<String> yearHints = new ArrayList<>();
 
+    @Builder.Default
+    private java.util.Map<String, Object> userMetadataEquals = new java.util.LinkedHashMap<>();
+
     public boolean isEmpty() {
         return documentNameHints.isEmpty()
             && sectionPathHints.isEmpty()
             && canonicalPathHints.isEmpty()
             && structureNodeIdHints.isEmpty()
             && itemIndexHints.isEmpty()
-            && yearHints.isEmpty();
+            && yearHints.isEmpty()
+            && userMetadataEquals.isEmpty();
     }
 }

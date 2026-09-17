@@ -162,7 +162,7 @@ public class GraphRagRetrievalChannel implements RetrievalChannel {
         if (StrUtil.isNotBlank(result.getCommunitySummary())) {
             builder.append("社区报告：").append(result.getCommunitySummary()).append('\n');
             if (isCommunitySummaryOnly(result)) {
-                builder.append("社区报告边界：该候选缺少可回到原文 quote 的 KG evidence，只能作为背景线索，不能单独支撑具体事实结论。\n");
+                builder.append("种类：综述。缺少原文 span 时按 SUMMARY 引用，不要写成原文摘录。\n");
             }
         }
         if (StrUtil.isNotBlank(result.getNHopPath())) {

@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.smartledge.ai.knowledge.augmentation.data.SuperAgentKgEntity;
 import org.smartledge.ai.knowledge.augmentation.data.SuperAgentKgEvidence;
 import org.smartledge.ai.knowledge.augmentation.data.SuperAgentKgRelation;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -43,9 +45,17 @@ public class GraphRagCrossDocumentIndexSupport {
     );
 
     private final ObjectMapper objectMapper;
+    private final GraphCommunityAlgorithm communityAlgorithm;
 
     public GraphRagCrossDocumentIndexSupport(ObjectMapper objectMapper) {
+        this(objectMapper, null);
+    }
+
+    @Autowired
+    public GraphRagCrossDocumentIndexSupport(ObjectMapper objectMapper,
+                                             ObjectProvider<GraphCommunityAlgorithm> communityAlgorithm) {
         this.objectMapper = objectMapper;
+        this.communityAlgorithm = communityAlgorithm == null ? null : communityAlgorithm.getIfAvailable();
     }
 
     public GraphRagCrossDocumentIndex build(List<SuperAgentKgEntity> entities,
@@ -521,19 +531,7 @@ public class GraphRagCrossDocumentIndexSupport {
             return index;
         }
 
-        Map<String, String> parent = new LinkedHashMap<>();
-        for (String canonicalKey : canonicalByKey.keySet()) {
-            parent.put(canonicalKey, canonicalKey);
-        }
-        for (GraphRagCrossDocumentIndex.RelationGroup relationGroup : relationByKey.values()) {
-            if (StrUtil.isBlank(relationGroup.sourceGroupKey())
-                || StrUtil.isBlank(relationGroup.targetGroupKey())
-                || !parent.containsKey(relationGroup.sourceGroupKey())
-                || !parent.containsKey(relationGroup.targetGroupKey())) {
-                continue;
-            }
-            unionKey(parent, relationGroup.sourceGroupKey(), relationGroup.targetGroupKey());
-        }
+        Map<String, String> parent = communityParent(canonicalByKey, relationByKey);
 
         Map<String, CommunityAccumulator> accumulators = new LinkedHashMap<>();
         for (GraphRagCrossDocumentIndex.RelationGroup relationGroup : relationByKey.values()) {
@@ -592,6 +590,54 @@ public class GraphRagCrossDocumentIndexSupport {
             communityByKey,
             communityByRelationGroupKey
         );
+    }
+
+    private Map<String, String> communityParent(Map<String, GraphRagCrossDocumentIndex.CanonicalEntityGroup> canonicalByKey,
+                                                Map<String, GraphRagCrossDocumentIndex.RelationGroup> relationByKey) {
+        Map<String, String> leiden = leidenMembership(canonicalByKey, relationByKey);
+        if (!leiden.isEmpty()) {
+            return leiden;
+        }
+        Map<String, String> parent = new LinkedHashMap<>();
+        for (String canonicalKey : canonicalByKey.keySet()) {
+            parent.put(canonicalKey, canonicalKey);
+        }
+        for (GraphRagCrossDocumentIndex.RelationGroup relationGroup : relationByKey.values()) {
+            if (StrUtil.isBlank(relationGroup.sourceGroupKey())
+                || StrUtil.isBlank(relationGroup.targetGroupKey())
+                || !parent.containsKey(relationGroup.sourceGroupKey())
+                || !parent.containsKey(relationGroup.targetGroupKey())) {
+                continue;
+            }
+            unionKey(parent, relationGroup.sourceGroupKey(), relationGroup.targetGroupKey());
+        }
+        return parent;
+    }
+
+    private Map<String, String> leidenMembership(Map<String, GraphRagCrossDocumentIndex.CanonicalEntityGroup> canonicalByKey,
+                                                 Map<String, GraphRagCrossDocumentIndex.RelationGroup> relationByKey) {
+        if (communityAlgorithm == null) {
+            return Map.of();
+        }
+        List<GraphCommunityAlgorithm.Edge> edges = relationByKey.values().stream()
+            .filter(group -> StrUtil.isNotBlank(group.sourceGroupKey()) && StrUtil.isNotBlank(group.targetGroupKey()))
+            .map(group -> new GraphCommunityAlgorithm.Edge(group.sourceGroupKey(), group.targetGroupKey()))
+            .toList();
+        try {
+            Map<String, String> membership = communityAlgorithm.assign(List.copyOf(canonicalByKey.keySet()), edges);
+            if (membership == null || membership.isEmpty()) {
+                return Map.of();
+            }
+            Map<String, String> parent = new LinkedHashMap<>();
+            for (String canonicalKey : canonicalByKey.keySet()) {
+                String communityId = membership.get(canonicalKey);
+                parent.put(canonicalKey, StrUtil.blankToDefault(communityId, canonicalKey));
+            }
+            return parent;
+        }
+        catch (RuntimeException ignored) {
+            return Map.of();
+        }
     }
 
     private String communityComponentKey(Map<String, String> parent,

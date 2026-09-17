@@ -9,6 +9,8 @@ import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 import org.smartledge.database.data.BaseTableData;
 
+import java.time.LocalDateTime;
+
 /**
  * @description: 数据实体
  * @author: Song
@@ -23,6 +25,8 @@ public class SuperAgentDocument extends BaseTableData {
 
     @TableId(value = "id", type = IdType.INPUT)
     private Long id;
+
+    private Long tenantId;
 
     private String documentName;
 
@@ -66,6 +70,16 @@ public class SuperAgentDocument extends BaseTableData {
 
     /** JSON object owned by the document lifecycle; distinct from generated chunk metadata. */
     private String metadataJson;
+
+    private String contentHash;
+
+    private String sourceUri;
+
+    private String language;
+
+    private LocalDateTime effectiveFrom;
+
+    private LocalDateTime expiresAt;
 
     private Long currentPlanId;
 

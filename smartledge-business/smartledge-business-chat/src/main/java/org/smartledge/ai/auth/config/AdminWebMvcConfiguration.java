@@ -1,6 +1,7 @@
 package org.smartledge.ai.auth.config;
 
 import org.smartledge.ai.auth.support.ManagePermissionInterceptor;
+import org.smartledge.ai.auth.support.PortfolioDemoInterceptor;
 import org.smartledge.ai.auth.support.PreviewModeInterceptor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
@@ -20,10 +21,14 @@ public class AdminWebMvcConfiguration implements WebMvcConfigurer {
 
     private final PreviewModeInterceptor previewModeInterceptor;
 
+    private final PortfolioDemoInterceptor portfolioDemoInterceptor;
+
     public AdminWebMvcConfiguration(ManagePermissionInterceptor managePermissionInterceptor,
-                                    PreviewModeInterceptor previewModeInterceptor) {
+                                    PreviewModeInterceptor previewModeInterceptor,
+                                    PortfolioDemoInterceptor portfolioDemoInterceptor) {
         this.managePermissionInterceptor = managePermissionInterceptor;
         this.previewModeInterceptor = previewModeInterceptor;
+        this.portfolioDemoInterceptor = portfolioDemoInterceptor;
     }
 
     @Override
@@ -33,5 +38,8 @@ public class AdminWebMvcConfiguration implements WebMvcConfigurer {
 
         registry.addInterceptor(previewModeInterceptor)
             .addPathPatterns("/**");
+
+        registry.addInterceptor(portfolioDemoInterceptor)
+            .addPathPatterns("/manage/**", "/api/chat/**");
     }
 }

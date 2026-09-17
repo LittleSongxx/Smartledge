@@ -24,8 +24,33 @@ describe('F07 explicit citation projection', () => {
     ], [])
 
     expect(view.explicitCitationIdentities).toEqual([])
+    expect(view.retrievedSourceIdentities).toEqual([])
     expect(view.finalReferences).toEqual([])
     expect(view.summary.finalReferenceCount).toBe(0)
+  })
+
+  it('keeps retrieved sources when binding recorded no legal token', () => {
+    const view = buildExplicitCitationView([
+      {
+        stageCode: 'CITATION_BINDING',
+        snapshot: {
+          authority: 'EXPLICIT_REFERENCE_TOKEN',
+          parsedTokenCount: 0,
+          bindings: [],
+          explicitCitationIdentities: [],
+          sourceSnapshotIdentities: [],
+          retrievedSourceIdentities: ['source-a'],
+          renderedSourceIdentities: ['source-a']
+        }
+      }
+    ], [{ citationIdentity: 'source-a', documentName: 'A' }])
+
+    expect(view.explicitCitationIdentities).toEqual([])
+    expect(view.sourceSnapshotIdentities).toEqual([])
+    expect(view.retrievedSourceIdentities).toEqual(['source-a'])
+    expect(view.finalReferences).toEqual([])
+    expect(view.summary.finalReferenceCount).toBe(0)
+    expect(view.summary.retrievedSourceCount).toBe(1)
   })
 
   it('preserves backend binding and source-snapshot order', () => {

@@ -17,9 +17,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * weighted_sum 多通道融合：RRF 通道加权 rankScore + 归一 originalScore +
- * build-time rank feature（metadataBoost，来自 {@link RankFeatureService}）。输出 fusionScore（HYBRID_SCORE）
- * 与 scoreParts（RRF_SCORE/METADATA_BOOST/VECTOR_SCORE/KEYWORD_SCORE）写回 metadata。
+ * 通道加权 RRF（k=60）。原始通道分、metadataBoost 只写入观测 metadata，不进入最终加法。
  *
  * <p>Fusion does not reserve, replace, or select final evidence.</p>
  */
@@ -35,14 +33,13 @@ public class HybridFusionService {
 
     public List<RetrievalDocument> fuse(List<RetrievalChannelResult> channelResults, RetrievalPlan plan) {
         Map<String, CandidateHolder> holders = new LinkedHashMap<>();
-        Map<String, Double> channelMaxScoreMap = resolveChannelMaxScoreMap(channelResults);
 
         for (RetrievalChannelResult retrievalChannelResult : channelResults) {
-            accumulateWeightedHybrid(retrievalChannelResult, holders, channelMaxScoreMap, plan);
+            accumulateWeightedRrf(retrievalChannelResult, holders, plan);
         }
 
         List<CandidateHolder> sortedHolders = holders.values().stream()
-            .peek(holder -> finishHybridScore(holder, plan))
+            .peek(this::finishRrfScore)
             .peek(this::writeHybridMetadata)
             .sorted((left, right) -> Double.compare(right.score, left.score))
             .toList();
@@ -77,27 +74,9 @@ public class HybridFusionService {
             holder.channels.size() > 1 ? "hybrid" : holder.channels.iterator().next());
     }
 
-    private Map<String, Double> resolveChannelMaxScoreMap(List<RetrievalChannelResult> channelResults) {
-        Map<String, Double> maxScoreMap = new LinkedHashMap<>();
-        for (RetrievalChannelResult channelResult : channelResults == null ? List.<RetrievalChannelResult>of() : channelResults) {
-            if (channelResult == null || channelResult.getDocuments() == null) {
-                continue;
-            }
-            double maxScore = channelResult.getDocuments().stream()
-                .map(this::resolveScore)
-                .filter(java.util.Objects::nonNull)
-                .mapToDouble(Double::doubleValue)
-                .max()
-                .orElse(0D);
-            maxScoreMap.put(channelResult.getChannelName(), Math.max(maxScore, 0D));
-        }
-        return maxScoreMap;
-    }
-
-    private void accumulateWeightedHybrid(RetrievalChannelResult channelResult,
-                                          Map<String, CandidateHolder> holders,
-                                          Map<String, Double> channelMaxScoreMap,
-                                          RetrievalPlan plan) {
+    private void accumulateWeightedRrf(RetrievalChannelResult channelResult,
+                                       Map<String, CandidateHolder> holders,
+                                       RetrievalPlan plan) {
         if (channelResult == null || channelResult.getDocuments() == null) {
             return;
         }
@@ -107,14 +86,9 @@ public class HybridFusionService {
             EvidenceCandidateIdentity.ensure(document);
             String fusionIdentity = fusionIdentity(document);
 
-            double rrfScore = 1D / (RRF_K + rank + 1);
-            double normalizedRankScore = (RRF_K + 1D) * rrfScore;
-            Double originalScore = resolveScore(document);
-            double normalizedOriginalScore = normalizeOriginalScore(
-                originalScore,
-                channelMaxScoreMap.getOrDefault(channelResult.getChannelName(), 0D)
-            );
             double channelWeight = resolveChannelWeight(channelResult.getChannelName(), plan);
+            double weightedRrf = channelWeight * (1D / (RRF_K + rank + 1));
+            Double originalScore = resolveScore(document);
             document.getMetadata().put(DocumentKnowledgeMetadataKeys.RETRIEVAL_INTENT, resolveRetrievalIntent(plan).name());
             document.getMetadata().put(DocumentKnowledgeMetadataKeys.CHANNEL_WEIGHT, channelWeight);
             if (RetrievalChannelEnum.VECTOR.getName().equals(channelResult.getChannelName()) && originalScore != null) {
@@ -125,9 +99,7 @@ public class HybridFusionService {
             }
             CandidateHolder holder = holders.computeIfAbsent(fusionIdentity, ignored -> new CandidateHolder(document));
             mergeGraphRagMetadata(holder, document);
-            holder.rrfScore += rrfScore;
-            holder.rankScore += channelWeight * hybridRankWeight(plan) * normalizedRankScore;
-            holder.originalScore += channelWeight * hybridOriginalScoreWeight(plan) * normalizedOriginalScore;
+            holder.rrfScore += weightedRrf;
             holder.metadataBoost = Math.max(holder.metadataBoost, rankFeatureService.calculateMetadataBoost(document, plan));
             holder.channels.add(channelResult.getChannelName());
             if (RetrievalChannelEnum.VECTOR.getName().equals(channelResult.getChannelName()) && originalScore != null) {
@@ -148,17 +120,8 @@ public class HybridFusionService {
         };
     }
 
-    private void finishHybridScore(CandidateHolder holder, RetrievalPlan plan) {
-        holder.score = holder.rankScore
-            + holder.originalScore
-            + hybridMetadataBoostWeight(plan) * Math.min(holder.metadataBoost, hybridMaxMetadataBoost(plan));
-    }
-
-    private double normalizeOriginalScore(Double originalScore, double channelMaxScore) {
-        if (originalScore == null || originalScore <= 0D || channelMaxScore <= 0D) {
-            return 0D;
-        }
-        return Math.min(1D, originalScore / channelMaxScore);
+    private void finishRrfScore(CandidateHolder holder) {
+        holder.score = holder.rrfScore;
     }
 
     /** Fusion consumes the channel weight already frozen into the RetrievalPlan. */
@@ -215,22 +178,6 @@ public class HybridFusionService {
             || metadata.get(DocumentKnowledgeMetadataKeys.KG_RELATION_ID) != null;
     }
 
-    private double hybridRankWeight(RetrievalPlan plan) {
-        return plan == null || plan.getRankFeatures() == null ? 1D : Math.max(0D, plan.getRankFeatures().getRankWeight());
-    }
-
-    private double hybridOriginalScoreWeight(RetrievalPlan plan) {
-        return plan == null || plan.getRankFeatures() == null ? 0.08D : Math.max(0D, plan.getRankFeatures().getOriginalScoreWeight());
-    }
-
-    private double hybridMetadataBoostWeight(RetrievalPlan plan) {
-        return plan == null || plan.getRankFeatures() == null ? 0.04D : Math.max(0D, plan.getRankFeatures().getMetadataBoostWeight());
-    }
-
-    private double hybridMaxMetadataBoost(RetrievalPlan plan) {
-        return plan == null || plan.getRankFeatures() == null ? 1D : Math.max(0D, plan.getRankFeatures().getMaxMetadataBoost());
-    }
-
     private RetrievalIntent resolveRetrievalIntent(RetrievalPlan plan) {
         return plan == null || plan.getPrimaryIntent() == null ? RetrievalIntent.GENERAL : plan.getPrimaryIntent();
     }
@@ -273,8 +220,6 @@ public class HybridFusionService {
         private final RetrievalDocument document;
         private final LinkedHashSet<String> channels = new LinkedHashSet<>();
         private double rrfScore;
-        private double rankScore;
-        private double originalScore;
         private double metadataBoost;
         private double score;
         private Double vectorScore;

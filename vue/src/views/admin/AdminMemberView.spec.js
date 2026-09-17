@@ -41,7 +41,7 @@ const MEMBER_ALICE = {
   id: 3,
   username: 'alice',
   displayName: '普通用户 Alice',
-  status: 1,
+  status: '1',
   roleIds: [3],
   roleCodes: ['USER'],
   roleNames: ['普通用户'],

@@ -8,6 +8,9 @@ import org.smartledge.ai.manage.data.SuperAgentDocumentAcl;
 import org.smartledge.ai.manage.mapper.SuperAgentDocumentAclMapper;
 import org.smartledge.ai.manage.service.DocumentAclStore;
 import org.smartledge.database.tenant.RequestIdentity;
+import org.smartledge.enums.BaseCode;
+import org.smartledge.exception.SuperAgentFrameException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
 import java.util.Collection;
@@ -57,6 +60,27 @@ public class MybatisDocumentAclStore implements DocumentAclStore {
     }
 
     @Override
+    public Set<Long> visibleDocumentIdsForIdentity(RequestIdentity identity) {
+        if (identity == null || identity.tenantId() == null) {
+            return Set.of();
+        }
+        try {
+            Map<Long, Integer> bestRankByDocument = bestRankByDocument(null, identity);
+            Set<Long> allowed = new LinkedHashSet<>();
+            bestRankByDocument.forEach((documentId, rank) -> {
+                if (rank >= RANK_READ) {
+                    allowed.add(documentId);
+                }
+            });
+            return Set.copyOf(allowed);
+        }
+        catch (RuntimeException exception) {
+            log.warn("文档 ACL 全量可见性解析失败，本次按不可见处理，tenantId={}", identity.tenantId(), exception);
+            return Set.of();
+        }
+    }
+
+    @Override
     public Set<Long> writableDocumentIds(Collection<Long> documentIds, RequestIdentity identity) {
         return documentIdsAtLeast(documentIds, identity, RANK_WRITE);
     }
@@ -102,26 +126,16 @@ public class MybatisDocumentAclStore implements DocumentAclStore {
                       Long principalId,
                       String permission,
                       Long grantedBy) {
-        if (documentId == null || identity == null || principalId == null
-            || principalType == null || permission == null) {
-            return;
+        if (documentId == null || identity == null || identity.tenantId() == null
+            || principalId == null || principalType == null || principalType.isBlank()
+            || permission == null || permission.isBlank()) {
+            throw new SuperAgentFrameException(BaseCode.PARAMETER_ERROR.getCode(), "文档授权参数不完整。");
         }
         // upsert：唯一键是 (document_id, principal_type, principal_id)，因此"再次授予"只能是改权限，
-        // 不能是插入第二行；已撤销的行在这里被重新启用。
-        SuperAgentDocumentAcl existing = documentAclMapper.selectOne(
-            new LambdaQueryWrapper<SuperAgentDocumentAcl>()
-                .eq(SuperAgentDocumentAcl::getTenantId, identity.tenantId())
-                .eq(SuperAgentDocumentAcl::getDocumentId, documentId)
-                .eq(SuperAgentDocumentAcl::getPrincipalType, principalType)
-                .eq(SuperAgentDocumentAcl::getPrincipalId, principalId)
-                .last("LIMIT 1"));
+        // 不能是插入第二行；已撤销的行在这里被重新启用。并发插入冲突时升级为更新。
+        SuperAgentDocumentAcl existing = findGrantRow(documentId, identity, principalType, principalId);
         if (existing != null) {
-            documentAclMapper.update(null, new LambdaUpdateWrapper<SuperAgentDocumentAcl>()
-                .eq(SuperAgentDocumentAcl::getTenantId, identity.tenantId())
-                .eq(SuperAgentDocumentAcl::getId, existing.getId())
-                .set(SuperAgentDocumentAcl::getPermission, permission)
-                .set(SuperAgentDocumentAcl::getGrantedBy, grantedBy)
-                .set(SuperAgentDocumentAcl::getStatus, ENABLED));
+            updateGrant(existing, identity, permission, grantedBy);
             return;
         }
         SuperAgentDocumentAcl acl = new SuperAgentDocumentAcl();
@@ -133,7 +147,16 @@ public class MybatisDocumentAclStore implements DocumentAclStore {
         acl.setPermission(permission);
         acl.setGrantedBy(grantedBy);
         acl.setStatus(ENABLED);
-        documentAclMapper.insert(acl);
+        try {
+            documentAclMapper.insert(acl);
+        }
+        catch (DuplicateKeyException duplicate) {
+            SuperAgentDocumentAcl raced = findGrantRow(documentId, identity, principalType, principalId);
+            if (raced == null) {
+                throw duplicate;
+            }
+            updateGrant(raced, identity, permission, grantedBy);
+        }
     }
 
     @Override
@@ -149,6 +172,43 @@ public class MybatisDocumentAclStore implements DocumentAclStore {
             .eq(SuperAgentDocumentAcl::getPrincipalId, principalId)
             .eq(SuperAgentDocumentAcl::getStatus, ENABLED)
             .set(SuperAgentDocumentAcl::getStatus, DISABLED)) > 0;
+    }
+
+    @Override
+    public int revokeAllForDocument(Long documentId, RequestIdentity identity) {
+        if (documentId == null || identity == null || identity.tenantId() == null) {
+            throw new SuperAgentFrameException(BaseCode.PARAMETER_ERROR.getCode(), "撤销文档授权参数不完整。");
+        }
+        return documentAclMapper.update(null, new LambdaUpdateWrapper<SuperAgentDocumentAcl>()
+            .eq(SuperAgentDocumentAcl::getTenantId, identity.tenantId())
+            .eq(SuperAgentDocumentAcl::getDocumentId, documentId)
+            .eq(SuperAgentDocumentAcl::getStatus, ENABLED)
+            .set(SuperAgentDocumentAcl::getStatus, DISABLED));
+    }
+
+    private SuperAgentDocumentAcl findGrantRow(Long documentId,
+                                               RequestIdentity identity,
+                                               String principalType,
+                                               Long principalId) {
+        return documentAclMapper.selectOne(
+            new LambdaQueryWrapper<SuperAgentDocumentAcl>()
+                .eq(SuperAgentDocumentAcl::getTenantId, identity.tenantId())
+                .eq(SuperAgentDocumentAcl::getDocumentId, documentId)
+                .eq(SuperAgentDocumentAcl::getPrincipalType, principalType)
+                .eq(SuperAgentDocumentAcl::getPrincipalId, principalId)
+                .last("LIMIT 1"));
+    }
+
+    private void updateGrant(SuperAgentDocumentAcl existing,
+                             RequestIdentity identity,
+                             String permission,
+                             Long grantedBy) {
+        documentAclMapper.update(null, new LambdaUpdateWrapper<SuperAgentDocumentAcl>()
+            .eq(SuperAgentDocumentAcl::getTenantId, identity.tenantId())
+            .eq(SuperAgentDocumentAcl::getId, existing.getId())
+            .set(SuperAgentDocumentAcl::getPermission, permission)
+            .set(SuperAgentDocumentAcl::getGrantedBy, grantedBy)
+            .set(SuperAgentDocumentAcl::getStatus, ENABLED));
     }
 
     private Set<Long> documentIdsAtLeast(Collection<Long> documentIds, RequestIdentity identity, int requiredRank) {
@@ -182,8 +242,10 @@ public class MybatisDocumentAclStore implements DocumentAclStore {
         LambdaQueryWrapper<SuperAgentDocumentAcl> query = new LambdaQueryWrapper<SuperAgentDocumentAcl>()
             .select(SuperAgentDocumentAcl::getDocumentId, SuperAgentDocumentAcl::getPermission)
             .eq(SuperAgentDocumentAcl::getTenantId, identity.tenantId())
-            .in(SuperAgentDocumentAcl::getDocumentId, candidates)
             .eq(SuperAgentDocumentAcl::getStatus, ENABLED);
+        if (candidates != null && !candidates.isEmpty()) {
+            query.in(SuperAgentDocumentAcl::getDocumentId, candidates);
+        }
 
         Set<Long> roleIds = identity.roleIds();
         Long userId = identity.userId();

@@ -264,6 +264,25 @@ class GraphExtractTest(unittest.TestCase):
             self.assertEqual(raised.exception.detail['category'], 'READ_TIMEOUT')
             self.assertEqual(http.call_count, 1)
 
+    def test_successful_parse_is_not_upgraded_to_timeout(self):
+        from rag_tools import graph_candidates
+        request = self.request(['record.'])
+        plan = extract_graph(request).metadata
+        batch = self.batch_request(request, plan, plan['batches'][0])
+        clock = [100.0]
+        real_parse = graph_candidates.parse
+
+        def parse_then_expire(*args, **kwargs):
+            result = real_parse(*args, **kwargs)
+            clock[0] = 10 ** 9
+            return result
+
+        with patch('rag_tools.graph_candidates.time.monotonic', side_effect=lambda: clock[0]), \
+                patch('rag_tools.graph_candidates.parse', side_effect=parse_then_expire), \
+                patch('urllib.request.urlopen', return_value=self.response(dict(entities=[], relations=[], evidences=[]))):
+            result = extract_graph(batch)
+        self.assertEqual(result.metadata['status'], 'completed')
+
     def test_endpoint_preserves_typed_failures_without_leaking_provider_text(self):
         request = self.request(['record.'])
         plan = extract_graph(request).metadata

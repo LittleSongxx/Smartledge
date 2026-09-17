@@ -24,6 +24,8 @@ public class SuperAgentDocumentStrategyStep extends BaseTableData {
     @TableId(value = "id", type = IdType.INPUT)
     private Long id;
 
+    private Long tenantId;
+
     private Long planId;
 
     private Long documentId;

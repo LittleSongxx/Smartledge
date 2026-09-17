@@ -25,6 +25,11 @@
             <artifactId>reactor-core</artifactId>
         </dependency>
         <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-api</artifactId>
+            <version>${opentelemetry.version}</version>
+        </dependency>
+        <dependency>
             <groupId>org.smartledge</groupId>
             <artifactId>smartledge-common-frame</artifactId>
             <version>${revision}</version>

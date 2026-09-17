@@ -116,7 +116,9 @@ public class UserAuthServiceImpl implements UserAuthService {
             account.username(),
             audience,
             Set.copyOf(roleIds),
-            permissions
+            permissions,
+            account.tokenVersion(),
+            null
         );
     }
 

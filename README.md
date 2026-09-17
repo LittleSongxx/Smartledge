@@ -99,7 +99,7 @@ flowchart TB
 | 文档解析与索引编排 | [`smartledge-knowledge-indexing`](smartledge-business/smartledge-knowledge-indexing/) | 解析产物归档、结构化切块、向量与关键词索引、任务投递与对账（RabbitMQ + 定时对账），失败可重试 |
 | 可观测性 | 观测表 `chat_retrieval_result` / `chat_channel_execution` / `chat_stage_benchmark` + [`ObservabilityManageController`](smartledge-business/smartledge-business-chat/src/main/java/org/smartledge/ai/manage/controller/ObservabilityManageController.java) | 会话 → 请求 → 阶段三级下钻；通道级召回明细、阶段耗时、证据与引用快照可回放 |
 | SSE 流式对话 | [`BusinessChatController`](smartledge-business/smartledge-business-chat/src/main/java/org/smartledge/ai/chatagent/controller/BusinessChatController.java) · [`api.js`](vue/src/api/api.js) | 后端 `text/event-stream`；前端增量解析并对乱序/重复事件做幂等合并（`shouldApplyStreamEvent` / `mergeAssistantStreamEvent`） |
-| 评测与探针 | [`chatagent/evaluation/`](smartledge-business/smartledge-business-chat/src/main/java/org/smartledge/ai/chatagent/evaluation/) | 评测快照与只读检索探针（RetrievalProbe），可在不改动数据的前提下复现一次检索的通道与证据 |
+| 评测与探针 | [`evaluation/`](smartledge-business/smartledge-rag-runtime/src/main/java/org/smartledge/ai/chatagent/evaluation/) | 手续快照（CONTRACT / TRACE / BINDING，不是 relevance）· `rag-gold.v1` 计分器 · `rag-gold-replay.v1` · 只读检索探针；离线 faithfulness 在 `rag_tools.eval` |
 
 ## 技术栈
 
@@ -249,7 +249,7 @@ npm run dev     # http://127.0.0.1:5174，已代理 /api、/admin/auth、/manage
 
 - **模型服务是外部依赖**：对话、向量化、重排、GraphRAG 抽取与 RAPTOR 摘要都依赖可用的 OpenAI 兼容网关与有效额度；凭据缺失时应用仍能启动，相关调用会走上表的重试与降级策略。
 - **首次索引有云端成本**：向量化与重排默认走云端 API，首次全量索引会消耗额度、产生少量费用；改用本地推理可避免 API 成本，但需要相应内存与算力。
-- **评测以离线与人工为主**：仓库内提供观测表与只读探针，但没有内置的在线 A/B 或端到端评分平台；模型理解、重排与答案生成存在波动，链路合法性由确定性断言保护，回答质量仍需人工评估。
+- **评测把手续和离线质量分分开**：O9 / CONTRACT 只对账手续；`rag-gold.v1` 的 identity 是合成计分键，真实检索用 `rag-gold-replay.v1` 或探针 identity 列表计分。离线 faithfulness 只读快照/JSONL，不写 `[n]`。没有在线 A/B。模型波动仍需人工评估。入口：`bash scripts/rag-eval-gate.sh`。
 - **单节点部署形态**：`deploy/docker-compose.yml` 面向本机开发与演示，未提供 K8s/Helm、网关与注册中心编排。
 
 ## 许可

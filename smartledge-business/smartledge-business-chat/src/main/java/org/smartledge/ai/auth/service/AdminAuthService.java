@@ -12,4 +12,7 @@ public interface AdminAuthService {
     AdminLoginVo login(UserLoginRequest request);
 
     AdminProfileVo currentProfile();
+
+    /** 作废当前登录 token（升高 token 版本）。 */
+    void logout();
 }

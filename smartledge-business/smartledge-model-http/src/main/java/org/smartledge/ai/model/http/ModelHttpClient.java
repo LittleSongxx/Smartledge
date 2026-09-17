@@ -39,6 +39,7 @@ public final class ModelHttpClient implements AutoCloseable {
     private final Set<CompletableFuture<?>> active = ConcurrentHashMap.newKeySet();
     private final Set<StreamingChatCall> streams = ConcurrentHashMap.newKeySet();
     private final AtomicBoolean closed = new AtomicBoolean();
+    private final OpenAiSdkTransport sdk;
     private final ChatModelPort chat = new ChatModelPort() {
         @Override public ChatResult call(String system, String user, ChatCallOptions options) {
             return callChat(system, user, options);
@@ -75,6 +76,7 @@ public final class ModelHttpClient implements AutoCloseable {
         this.timer = scheduler;
         this.client = HttpClient.newBuilder().executor(workers).connectTimeout(settings.connectTimeout())
             .followRedirects(HttpClient.Redirect.NEVER).version(HttpClient.Version.HTTP_1_1).build();
+        this.sdk = new OpenAiSdkTransport(settings, this.mapper);
     }
     private static Thread daemon(Runnable runnable, String name) {
         Thread thread = new Thread(runnable, name); thread.setDaemon(true); return thread;
@@ -121,73 +123,16 @@ public final class ModelHttpClient implements AutoCloseable {
     }
 
     private ChatResult callChat(String system, String user, ChatCallOptions overrides) {
-        JsonNode json = request(settings.chat(), chatBody(system, user, overrides, false), settings.chatMaxAttempts(), "chat");
-        try {
-            ChatWire response = mapper.treeToValue(json, ChatWire.class);
-            if (response.choices() == null || response.choices().size() != 1 || blank(response.model()) || blank(response.id())) {
-                throw failure(INVALID_RESPONSE, 200, "chat");
-            }
-            ChoiceWire choice = response.choices().get(0);
-            if (choice == null || choice.message() == null || blank(choice.finishReason())) { throw failure(INVALID_RESPONSE, 200, "chat"); }
-            MessageWire message = choice.message();
-            if (message.content() != null && !message.content().isNull() && !message.content().isTextual()) {
-                throw failure(INVALID_RESPONSE, 200, "chat");
-            }
-            String text = message.content() == null ? "" : message.content().asText("");
-            List<ChatResult.ToolCall> calls = new ArrayList<>();
-            Set<String> ids = new java.util.HashSet<>();
-            if (message.toolCalls() != null) {
-                for (ToolWire tool : message.toolCalls()) {
-                    if (tool == null || blank(tool.id()) || !ids.add(tool.id()) || !"function".equals(tool.type())
-                        || tool.function() == null || blank(tool.function().name()) || tool.function().arguments() == null) {
-                        throw failure(INVALID_RESPONSE, 200, "chat-tool");
-                    }
-                    String arguments = tool.function().arguments();
-                    if (arguments.getBytes(StandardCharsets.UTF_8).length > settings.maxToolArgumentBytes()) { throw failure(LIMIT, 200, "chat-tool"); }
-                    calls.add(new ChatResult.ToolCall(tool.id(), tool.function().name(), arguments));
-                }
-            }
-            if (text.isBlank() && calls.isEmpty()) { throw failure(INVALID_RESPONSE, 200, "chat"); }
-            if (response.usage() != null && !response.usage().isNull() && !response.usage().isObject()) {
-                throw failure(INVALID_RESPONSE, 200, "chat-usage");
-            }
-            ChatResult.Usage usage = response.usage() == null || response.usage().isNull() ? null
-                : new ChatResult.Usage(token(response.usage(), "prompt_tokens"), token(response.usage(), "completion_tokens"), token(response.usage(), "total_tokens"));
-            return new ChatResult(text, response.id(), response.model(), choice.finishReason(), usage, calls);
-        }
-        catch (JsonProcessingException | IllegalArgumentException exception) { throw failure(INVALID_RESPONSE, 200, "chat"); }
+        checkCancellation("chat");
+        return sdk.chat(promptMessages(system, user), List.of(), overrides);
     }
 
     private List<float[]> callEmbedding(List<String> texts) {
         if (texts == null || texts.isEmpty() || texts.stream().anyMatch(java.util.Objects::isNull)) {
             throw new IllegalArgumentException("Embedding requires non-null input texts");
         }
-        // Dimensions are a validation contract. Do not change the provider's existing default output dimensions.
-        // 云端向量化按批调用远端接口：瞬时 429/5xx/超时做有界重试，避免单批抖动拖垮整篇文档的索引任务。
-        JsonNode json = request(settings.embedding(), Map.of("model", settings.embedding().model(), "input", List.copyOf(texts),
-            "encoding_format", "float"), settings.embeddingMaxAttempts(), "embedding");
-        JsonNode data = json.get("data");
-        if (data == null || !data.isArray() || data.size() != texts.size()) { throw failure(INVALID_RESPONSE, 200, "embedding"); }
-        float[][] ordered = new float[texts.size()][];
-        for (JsonNode item : data) {
-            JsonNode indexNode = item.get("index");
-            if (indexNode == null || !indexNode.isIntegralNumber() || !indexNode.canConvertToInt()) { throw failure(INVALID_RESPONSE, 200, "embedding-index"); }
-            int index = indexNode.intValue();
-            if (index < 0 || index >= ordered.length || ordered[index] != null) { throw failure(INVALID_RESPONSE, 200, "embedding-index"); }
-            JsonNode vector = item.get("embedding");
-            if (vector == null || !vector.isArray() || vector.size() != settings.embeddingDimensions()) { throw failure(INVALID_RESPONSE, 200, "embedding-dimensions"); }
-            float[] values = new float[vector.size()];
-            for (int offset = 0; offset < values.length; offset++) {
-                JsonNode number = vector.get(offset);
-                if (!number.isNumber() || !Double.isFinite(number.doubleValue()) || !Float.isFinite(number.floatValue())) {
-                    throw failure(INVALID_RESPONSE, 200, "embedding-value");
-                }
-                values[offset] = number.floatValue();
-            }
-            ordered[index] = values;
-        }
-        for (float[] vector : ordered) { if (vector == null) { throw failure(INVALID_RESPONSE, 200, "embedding-index"); } }
-        return List.of(ordered);
+        checkCancellation("embedding");
+        return sdk.embed(texts);
     }
 
     private JsonNode request(ModelHttpSettings.Endpoint endpoint, Map<String, Object> body, int attempts, String phase) {

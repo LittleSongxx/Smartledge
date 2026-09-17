@@ -38,6 +38,8 @@ public class ConversationExecutionPlan {
 
     private String longTermSummary;
 
+    private String longTermFactsText;
+
     @Builder.Default
     private HistoryPlanningContext historyPlanningContext = new HistoryPlanningContext();
 

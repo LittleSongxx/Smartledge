@@ -7,6 +7,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.smartledge.ai.manage.data.SuperAgentDocumentTaskLog;
 import org.smartledge.ai.manage.mapper.SuperAgentDocumentTaskLogMapper;
 import org.smartledge.ai.manage.service.DocumentTaskLogService;
+import org.smartledge.ai.manage.support.DerivedRowTenantScope;
+import org.smartledge.ai.manage.support.DocumentTenantLookup;
 import org.smartledge.enums.BusinessStatus;
 import org.springframework.stereotype.Service;
 
@@ -22,6 +24,7 @@ public class DocumentTaskLogServiceImpl implements DocumentTaskLogService {
     private final SuperAgentDocumentTaskLogMapper taskLogMapper;
     private final ObjectMapper objectMapper;
     private final UidGenerator uidGenerator;
+    private final DocumentTenantLookup documentTenantLookup;
 
     @Override
     public SuperAgentDocumentTaskLog saveLog(Long taskId,
@@ -33,8 +36,13 @@ public class DocumentTaskLogServiceImpl implements DocumentTaskLogService {
                                              Long operatorId,
                                              String content,
                                              Object detail) {
+        Long tenantId = documentTenantLookup.tenantOfDocument(documentId);
+        if (tenantId == null || tenantId <= 0) {
+            throw new IllegalStateException("写入任务日志缺少父文档租户，documentId=" + documentId);
+        }
         SuperAgentDocumentTaskLog log = new SuperAgentDocumentTaskLog();
         log.setId(uidGenerator.getUid());
+        log.setTenantId(tenantId);
         log.setTaskId(taskId);
         log.setDocumentId(documentId);
         log.setStageType(stageType);
@@ -45,7 +53,7 @@ public class DocumentTaskLogServiceImpl implements DocumentTaskLogService {
         log.setContent(content);
         log.setDetailJson(toJson(detail));
         log.setStatus(BusinessStatus.YES.getCode());
-        taskLogMapper.insert(log);
+        DerivedRowTenantScope.runPerDocument(tenantId, () -> taskLogMapper.insert(log));
         return log;
     }
 

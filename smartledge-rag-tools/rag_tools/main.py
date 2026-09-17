@@ -6,11 +6,13 @@ from fastapi import FastAPI, HTTPException
 from pydantic.warnings import UnsupportedFieldAttributeWarning
 
 from rag_tools.document_parser import document_parser_status, parse_document
+from rag_tools.graph_communities import detect_communities
 from rag_tools.graph_extract import extract_graph
 from rag_tools.graph_entity_llm import GraphEntityLlmError
 from rag_tools.raptor_build import build_raptor
 from rag_tools.schemas.document_parse import DocumentParseRequest, DocumentParseResponse
 from rag_tools.schemas.embed import EmbedRequest, EmbedResponse
+from rag_tools.schemas.graph_communities import GraphCommunityRequest, GraphCommunityResponse
 from rag_tools.schemas.graph_extract import GraphExtractRequest, GraphExtractResponse
 from rag_tools.schemas.raptor_build import RaptorBuildRequest, RaptorBuildResponse
 from rag_tools.schemas.rerank import RerankRequest, RerankResponse, RerankResult
@@ -119,6 +121,11 @@ def document_parse(request: DocumentParseRequest) -> DocumentParseResponse:
             int((time.perf_counter() - started) * 1000),
         )
         raise
+
+
+@app.post("/graph/communities", response_model=GraphCommunityResponse)
+def graph_communities(request: GraphCommunityRequest) -> GraphCommunityResponse:
+    return detect_communities(request)
 
 
 @app.post("/graph/extract", response_model=GraphExtractResponse)

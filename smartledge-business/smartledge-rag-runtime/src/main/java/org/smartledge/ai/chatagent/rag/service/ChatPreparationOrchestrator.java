@@ -411,6 +411,7 @@ public class ChatPreparationOrchestrator {
             .rewriteSubQuestions(List.of(question))
             .historySummary(historySummary)
             .longTermSummary(memoryContext.getLongTermSummary())
+            .longTermFactsText(memoryContext.renderFactsText())
             .historyPlanningContext(historyPlanningContext)
             .recentHistoryTranscript(memoryContext.getRecentTranscript())
             .answerRecentTranscript(memoryContext.getAnswerRecentTranscript())

@@ -155,12 +155,21 @@ public class ElasticsearchDocumentKeywordSearchGateway implements DocumentKeywor
         DocumentRetrieveFilters filters = request.getFilters();
         List<String> queryContextHints = request.getQueryContextHints() == null ? List.of() : request.getQueryContextHints();
 
+        Long tenantId = org.smartledge.ai.manage.support.IndexTenantGuard.searchableTenantId();
+        if (tenantId == null) {
+            return List.of();
+        }
+
         try {
             SearchResponse<DocumentKeywordIndexRecord> response = elasticsearchClient.search(search -> search
                     .index(keywordIndexName())
                     .size(resolveTopK(request.getTopK()))
                     .query(query -> query.bool(bool -> {
 
+                        bool.filter(filter -> filter.term(term -> term
+                            .field("tenantId")
+                            .value(tenantId)
+                        ));
                         bool.filter(filter -> filter.terms(terms -> terms
                             .field("documentId")
                             .terms(values -> values.value(documentFieldValues))
@@ -169,6 +178,24 @@ public class ElasticsearchDocumentKeywordSearchGateway implements DocumentKeywor
                             .field("taskId")
                             .terms(values -> values.value(taskFieldValues))
                         ));
+                        bool.filter(filter -> filter.term(term -> term.field("status").value(1)));
+                        bool.filter(filter -> filter.bool(fresh -> fresh
+                            .should(should -> should.bool(missing -> missing.mustNot(mustNot -> mustNot.exists(exists -> exists.field("expiresAt")))))
+                            .should(should -> should.range(range -> range.date(date -> date.field("expiresAt").gt("now"))))
+                            .minimumShouldMatch("1")
+                        ));
+                        if (filters != null && filters.getUserMetadataEquals() != null) {
+                            filters.getUserMetadataEquals().forEach((field, value) -> {
+                                if (field == null || value == null) {
+                                    return;
+                                }
+                                String name = field.startsWith("user.") ? field.substring(5) : field;
+                                bool.filter(filter -> filter.term(term -> term
+                                    .field("userMetadata." + name)
+                                    .value(String.valueOf(value))
+                                ));
+                            });
+                        }
                         if (filters != null && CollUtil.isNotEmpty(filters.getSectionPathHints())) {
                             bool.filter(filter -> filter.bool(sectionBool -> {
                                 for (String sectionHint : filters.getSectionPathHints()) {
@@ -255,6 +282,13 @@ public class ElasticsearchDocumentKeywordSearchGateway implements DocumentKeywor
                                 .type(TextQueryType.BestFields)
                             ));
                         }
+                        if (filters != null && CollUtil.isNotEmpty(filters.getYearHints())) {
+                            bool.should(should -> should.multiMatch(multiMatch -> multiMatch
+                                .query(String.join(" ", filters.getYearHints()))
+                                .fields("title^3", "sectionPath^2", "contentWithWeight^2", "chunkText^2", "documentName")
+                                .type(TextQueryType.BestFields)
+                            ));
+                        }
                         if (filters != null && CollUtil.isNotEmpty(filters.getSectionPathHints())) {
                             bool.should(should -> should.multiMatch(multiMatch -> multiMatch
                                 .query(String.join(" ", filters.getSectionPathHints()))
@@ -337,6 +371,36 @@ public class ElasticsearchDocumentKeywordSearchGateway implements DocumentKeywor
         }
     }
 
+    @Override
+    public void tombstoneByDocumentId(Long documentId) {
+        deleteByDocumentId(documentId);
+    }
+
+    @Override
+    public void tombstoneByTask(Long documentId, Long taskId) {
+        deleteByTask(documentId, taskId);
+    }
+
+    @Override
+    public void tombstoneStaleTasks(Long documentId, Long currentTaskId) {
+        if (documentId == null || currentTaskId == null || currentTaskId <= 0) {
+            return;
+        }
+        try {
+            elasticsearchClient.deleteByQuery(delete -> delete
+                .index(keywordIndexName())
+                .refresh(true)
+                .query(query -> query.bool(bool -> bool
+                    .filter(filter -> filter.term(term -> term.field("documentId").value(documentId)))
+                    .mustNot(mustNot -> mustNot.term(term -> term.field("taskId").value(currentTaskId)))
+                ))
+            );
+        }
+        catch (IOException exception) {
+            throw new IllegalStateException("回收 Elasticsearch 旧世代失败", exception);
+        }
+    }
+
     private Map<Long, SuperAgentDocument> loadDocumentMap(List<SuperAgentDocumentChunk> chunkList) {
         List<Long> documentIds = chunkList.stream()
             .map(SuperAgentDocumentChunk::getDocumentId)
@@ -357,6 +421,7 @@ public class ElasticsearchDocumentKeywordSearchGateway implements DocumentKeywor
     private DocumentKeywordIndexRecord toIndexRecord(SuperAgentDocumentChunk chunk, SuperAgentDocument document) {
         return DocumentKeywordIndexRecord.builder()
             .chunkId(String.valueOf(chunk.getId()))
+            .tenantId(document == null ? org.smartledge.database.tenant.TenantContext.get() : document.getTenantId())
             .documentId(chunk.getDocumentId())
             .taskId(chunk.getTaskId())
             .parentBlockId(chunk.getParentBlockId())
@@ -379,6 +444,9 @@ public class ElasticsearchDocumentKeywordSearchGateway implements DocumentKeywor
             .keywords(readStringArray(chunk.getKeywords()))
             .questions(readStringArray(chunk.getQuestions()))
             .chunkText(safeText(chunk.getChunkText()))
+            .status(document == null || document.getStatus() == null ? 1 : document.getStatus())
+            .expiresAt(document == null || document.getExpiresAt() == null ? null : document.getExpiresAt().toString())
+            .userMetadata(flattenUserMetadata(document))
             .build();
     }
 
@@ -482,6 +550,20 @@ public class ElasticsearchDocumentKeywordSearchGateway implements DocumentKeywor
         catch (NumberFormatException exception) {
             return null;
         }
+    }
+
+    private java.util.Map<String, String> flattenUserMetadata(SuperAgentDocument document) {
+        java.util.Map<String, String> values = new java.util.LinkedHashMap<>();
+        if (document == null || StrUtil.isBlank(document.getMetadataJson())) {
+            return values;
+        }
+        org.smartledge.ai.manage.support.IndexRetrievalFilter.flattenUserScalars(
+            new org.smartledge.ai.manage.support.DocumentMetadataJsonParser().parse(document.getMetadataJson())
+        ).forEach((key, value) -> {
+            String name = key.startsWith("user.") ? key.substring(5) : key;
+            values.put(name, value == null ? "" : String.valueOf(value));
+        });
+        return values;
     }
 
     private String safeText(String text) {

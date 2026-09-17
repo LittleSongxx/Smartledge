@@ -204,6 +204,8 @@ public class SearchReference {
 
     private String citationEvidenceType;
 
+    private String evidenceKind;
+
     private boolean contextOnly;
 
     private boolean sourceEvidenceResolved;

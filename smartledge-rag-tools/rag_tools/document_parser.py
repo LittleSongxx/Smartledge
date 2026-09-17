@@ -25,6 +25,7 @@ from rag_tools.schemas.document_parse import (
 
 ALIYUN_DOCMIND_PARSER_NAME = "aliyun_docmind"
 NATIVE_TEXT_PARSER_NAME = "native_text"
+DOCLING_PARSER_NAME = "docling"
 PARSER_VERSION = "0.2.0"
 
 ALIYUN_DOCMIND_FILE_TYPES = {"PDF", "DOCX", "XLSX", "PNG", "JPG", "JPEG", "BMP", "GIF"}
@@ -50,6 +51,12 @@ NATIVE_TEXT_CAPABILITIES = [
     "structure",
     "commonmark",
     "gfm-table",
+    "markdown-syntax-v1",
+]
+DOCLING_CAPABILITIES = [
+    "local-pdf",
+    "docling",
+    "markdown",
     "markdown-syntax-v1",
 ]
 
@@ -125,7 +132,7 @@ class AliyunDocMindParser:
         trace["pollElapsedMs"] = _elapsed_ms(wait_started)
         trace["pollCount"] = poll_count
         result_started = time.perf_counter()
-        result_payload, result_batch_count = self._fetch_result_pages(client, job_id)
+        result_payload, result_batch_count, page_warnings = self._fetch_result_pages(client, job_id)
         trace["resultFetchElapsedMs"] = _elapsed_ms(result_started)
         trace["resultBatchCount"] = result_batch_count
         response_payload = {
@@ -135,6 +142,7 @@ class AliyunDocMindParser:
         }
         normalize_started = time.perf_counter()
         blocks, markdown_syntax, warnings = self._result_to_blocks(result_payload)
+        warnings = [*page_warnings, *warnings]
         trace["standardizeElapsedMs"] = _elapsed_ms(normalize_started)
         trace.update(_parse_trace_metadata(
             blocks,
@@ -250,7 +258,7 @@ class AliyunDocMindParser:
             time.sleep(self._poll_interval_seconds())
         raise HTTPException(status_code=504, detail=f"阿里云 Document Mind 解析超时: jobId={job_id}, lastStatus={last_payload}")
 
-    def _fetch_result_pages(self, client, job_id: str) -> tuple[dict[str, Any], int]:
+    def _fetch_result_pages(self, client, job_id: str) -> tuple[dict[str, Any], int, list[str]]:
         try:
             from alibabacloud_docmind_api20220711 import models as docmind_models
         except Exception as exception:
@@ -260,6 +268,7 @@ class AliyunDocMindParser:
         first_payload: dict[str, Any] | None = None
         step_size = self._layout_step_size()
         result_batch_count = 0
+        page_warnings: list[str] = []
         for layout_num in range(0, self._max_result_pages() * step_size, step_size):
             get_request = docmind_models.GetDocParserResultRequest(
                 id=job_id,
@@ -279,6 +288,7 @@ class AliyunDocMindParser:
             data = _docmind_data(payload)
             layouts = _extract_docmind_layouts(data)
             if not layouts:
+                page_warnings.append("阿里云 Document Mind 空 layout 窗口，按分页结束处理。")
                 break
             result_batch_count += 1
             all_layouts.extend(layouts)
@@ -289,7 +299,7 @@ class AliyunDocMindParser:
         if isinstance(data, dict):
             data["layouts"] = all_layouts
             data["Layouts"] = all_layouts
-        return merged, result_batch_count
+        return merged, result_batch_count, page_warnings
 
     def _result_to_blocks(self, result_payload: dict[str, Any]) -> tuple[list[DocumentBlock], MarkdownSyntaxDocument | None, list[str]]:
         data = _docmind_data(result_payload)
@@ -300,10 +310,15 @@ class AliyunDocMindParser:
             syntax = parse_markdown_syntax(markdown, "PROVIDER_MARKDOWN")
             return markdown_syntax_to_blocks(syntax, self.provider_name), syntax, warnings
         blocks: list[DocumentBlock] = []
+        dropped_empty = 0
         for index, layout in enumerate(layouts, start=1):
             block = _docmind_layout_to_block(layout, index)
             if block is not None:
                 blocks.append(block)
+            else:
+                dropped_empty += 1
+        if dropped_empty:
+            warnings.append(f"阿里云 Document Mind 丢弃 {dropped_empty} 个空 layout 块。")
         if blocks:
             return blocks, None, warnings
         if markdown:
@@ -465,6 +480,72 @@ class NativeTextParser:
         return DocMindParseResult(blocks=blocks)
 
 
+class DoclingPdfParser:
+    provider_name = DOCLING_PARSER_NAME
+    provider_version = PARSER_VERSION
+    supported_file_types = {"PDF"}
+    capabilities = DOCLING_CAPABILITIES
+
+    def is_available(self) -> bool:
+        try:
+            import docling.document_converter  # noqa: F401
+            return True
+        except ImportError:
+            return False
+
+    def unavailable_reason(self) -> str:
+        if self.is_available():
+            return ""
+        return "未安装 Docling，请执行 pip install -r requirements-optional.txt。"
+
+    def status(self) -> dict[str, Any]:
+        available = self.is_available()
+        return {
+            "providerName": self.provider_name,
+            "providerVersion": self.provider_version,
+            "available": available,
+            "failedReason": "" if available else self.unavailable_reason(),
+            "supportedFileTypes": sorted(item.lower() for item in self.supported_file_types),
+            "capabilities": list(self.capabilities),
+            "fallbackEnabled": _docling_pdf_fallback_enabled(),
+        }
+
+    def parse(self, content: bytes, file_type: str, request: DocumentParseRequest) -> DocMindParseResult:
+        if file_type != "PDF":
+            raise HTTPException(status_code=422, detail=f"Docling 当前只作本地 PDF 第二解析器，不支持: {file_type or 'UNKNOWN'}")
+        if not self.is_available():
+            raise HTTPException(status_code=503, detail=self.unavailable_reason())
+        markdown = self._export_markdown(content, request.file_name)
+        syntax = parse_markdown_syntax(markdown, "SOURCE_MARKDOWN")
+        blocks = markdown_syntax_to_blocks(syntax, self.provider_name)
+        return DocMindParseResult(
+            blocks=blocks,
+            markdown_syntax=syntax,
+            metadata={"localPdfParser": DOCLING_PARSER_NAME},
+        )
+
+    def _export_markdown(self, content: bytes, file_name: str) -> str:
+        import tempfile
+        from pathlib import Path
+
+        from docling.document_converter import DocumentConverter
+
+        suffix = ".pdf"
+        if file_name and "." in file_name:
+            suffix = "." + file_name.rsplit(".", 1)[-1]
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as handle:
+            handle.write(content or b"")
+            handle.flush()
+            result = DocumentConverter().convert(Path(handle.name))
+        document = getattr(result, "document", None)
+        if document is None or not hasattr(document, "export_to_markdown"):
+            raise HTTPException(status_code=502, detail="Docling 未返回可导出的文档。")
+        markdown = document.export_to_markdown() or ""
+        if not markdown.strip():
+            raise HTTPException(status_code=422, detail="Docling 解析结果为空。")
+        return markdown
+
+
 def parse_document(request: DocumentParseRequest) -> DocumentParseResponse:
     started = time.perf_counter()
     content = _decode_content(request.content_base64)
@@ -549,6 +630,7 @@ def parse_document(request: DocumentParseRequest) -> DocumentParseResponse:
 def document_parser_status() -> dict[str, Any]:
     native_parser = _native_text_parser()
     docmind_parser = _parser()
+    docling_parser = _docling_parser()
     return {
         "defaultProvider": "type_routed",
         "routes": [
@@ -562,8 +644,13 @@ def document_parser_status() -> dict[str, Any]:
                 "fileTypes": sorted(item.lower() for item in docmind_parser.supported_file_types),
                 "description": "PDF、DOCX、XLSX、PNG、JPG/JPEG、BMP、GIF 使用阿里云 Document Mind 处理 OCR、layout、reading order、表格和图片结构。",
             },
+            {
+                "providerName": docling_parser.provider_name,
+                "fileTypes": ["pdf"],
+                "description": "仅当开启 SMARTLEDGE_DOCLING_PDF_FALLBACK 且 Document Mind 不可用时，本地 PDF 才走 Docling。",
+            },
         ],
-        "providers": [native_parser.status(), docmind_parser.status()],
+        "providers": [native_parser.status(), docmind_parser.status(), docling_parser.status()],
     }
 
 
@@ -575,11 +662,32 @@ def _native_text_parser() -> NativeTextParser:
     return NativeTextParser()
 
 
+def _docling_parser() -> DoclingPdfParser:
+    return DoclingPdfParser()
+
+
+def _docling_pdf_fallback_enabled() -> bool:
+    value = config_value(
+        "ragTools.documentParser.docling.pdfFallback",
+        "SMARTLEDGE_DOCLING_PDF_FALLBACK",
+        "false",
+    )
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _parser_for_file_type(file_type: str):
     if file_type in NATIVE_TEXT_FILE_TYPES:
         return _native_text_parser()
     if file_type in ALIYUN_DOCMIND_FILE_TYPES:
-        return _parser()
+        docmind = _parser()
+        if (
+            file_type == "PDF"
+            and not docmind.is_available()
+            and _docling_pdf_fallback_enabled()
+            and _docling_parser().is_available()
+        ):
+            return _docling_parser()
+        return docmind
     return None
 
 
@@ -776,17 +884,29 @@ def _docmind_rows_from_value(value: Any) -> list[list[str]]:
     if value and all(isinstance(row, list) for row in value):
         return _normalize_table_rows(value)
     if value and all(isinstance(item, dict) for item in value):
-        max_row = max((_to_int(item.get("rowIndex") or item.get("row") or item.get("rowNo")) or 0 for item in value), default=0)
-        max_col = max((_to_int(item.get("colIndex") or item.get("column") or item.get("columnNo") or item.get("col")) or 0 for item in value), default=0)
-        if max_row <= 0 or max_col <= 0:
-            return []
-        rows = [["" for _ in range(max_col)] for _ in range(max_row)]
+        placements: list[tuple[int, int, int, int, str]] = []
+        max_row = 0
+        max_col = 0
         for item in value:
             row_no = _to_int(item.get("rowIndex") or item.get("row") or item.get("rowNo")) or 0
             col_no = _to_int(item.get("colIndex") or item.get("column") or item.get("columnNo") or item.get("col")) or 0
             if row_no <= 0 or col_no <= 0:
                 continue
-            rows[row_no - 1][col_no - 1] = _cleanup_text(str(item.get("text") or item.get("value") or item.get("content") or ""))
+            row_span = max(1, _to_int(item.get("rowSpan") or item.get("rowspan")) or 1)
+            col_span = max(1, _to_int(item.get("colSpan") or item.get("colspan") or item.get("columnSpan")) or 1)
+            text = _cleanup_text(str(item.get("text") or item.get("value") or item.get("content") or ""))
+            placements.append((row_no, col_no, row_span, col_span, text))
+            max_row = max(max_row, row_no + row_span - 1)
+            max_col = max(max_col, col_no + col_span - 1)
+        if max_row <= 0 or max_col <= 0:
+            return []
+        rows = [["" for _ in range(max_col)] for _ in range(max_row)]
+        for row_no, col_no, row_span, col_span, text in placements:
+            for row_offset in range(row_span):
+                for col_offset in range(col_span):
+                    target = rows[row_no - 1 + row_offset][col_no - 1 + col_offset]
+                    if not target or (row_offset == 0 and col_offset == 0):
+                        rows[row_no - 1 + row_offset][col_no - 1 + col_offset] = text
         return _trim_table_rows(rows)
     return []
 
@@ -951,11 +1071,19 @@ def _parse_html(content: bytes) -> list[DocumentBlock]:
     parser = _HtmlBlockParser()
     parser.feed(_decode_text(content))
     parser.close()
-    return [
-        _block(index + 1, block_type, text, metadata={"parser": NATIVE_TEXT_PARSER_NAME})
-        for index, (block_type, text) in enumerate(parser.blocks)
-        if text.strip()
-    ]
+    blocks: list[DocumentBlock] = []
+    for block_type, text, table_html, table_rows in parser.blocks:
+        if not text.strip() and not table_html:
+            continue
+        blocks.append(_block(
+            len(blocks) + 1,
+            block_type,
+            text,
+            table_html=table_html,
+            table_rows=table_rows,
+            metadata={"parser": NATIVE_TEXT_PARSER_NAME},
+        ))
+    return blocks
 
 
 def _normalize_blocks(blocks: list[DocumentBlock]) -> list[DocumentBlock]:
@@ -1566,17 +1694,12 @@ def _render_parsed_text(blocks: list[DocumentBlock]) -> str:
 
 
 def _content_with_weight(block: DocumentBlock, current_section: str) -> str:
+    # Java owns weighted projection. Python only emits body/caption.
     parts = []
-    if current_section:
-        parts.append(f"section: {current_section}")
-    if block.block_type:
-        parts.append(f"type: {block.block_type}")
     if block.text:
         parts.append(block.text)
     if block.image_caption and block.image_caption != block.text:
-        parts.append(f"caption: {block.image_caption}")
-    if block.table_rows:
-        parts.append(_table_text(block.table_rows))
+        parts.append(block.image_caption)
     return "\n".join(parts)
 
 
@@ -1797,10 +1920,10 @@ def _structure_level(heading_count: int, paragraph_count: int) -> int:
 
 
 def _content_quality_level(text: str) -> int:
-    if not text or len(text) < 20:
+    if not text or not text.strip():
         return 1
     broken_ratio = text.count("�") / max(len(text), 1)
-    if broken_ratio > 0.02 or len(text) < 100:
+    if broken_ratio > 0.02:
         return 1
     if broken_ratio > 0.005 or len(text) < 500:
         return 2
@@ -1815,28 +1938,167 @@ def _table_html(rows: list[list[str]]) -> str:
     return "<table><tbody>" + "".join(body) + "</tbody></table>"
 
 
+class _HtmlBlockParser(HTMLParser):
+    _HEADINGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
+    _TEXT_BLOCKS = {"p", "li", "pre", "blockquote"}
+    _SKIP = {"script", "style", "noscript"}
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.blocks: list[tuple[str, str, str, list[list[str]]]] = []
+        self._skip_depth = 0
+        self._stack: list[str] = []
+        self._text: list[str] = []
+        self._loose_text: list[str] = []
+        self._table_depth = 0
+        self._table_html: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in self._SKIP:
+            self._skip_depth += 1
+            return
+        if self._skip_depth:
+            return
+        if tag == "table":
+            self._flush_text()
+            self._table_depth += 1
+            self._table_html.append(self._serialize_start(tag, attrs) if self._table_depth > 1 else "<table>")
+            return
+        if self._table_depth:
+            self._table_html.append(self._serialize_start(tag, attrs))
+            return
+        if tag in self._HEADINGS:
+            self._flush_text()
+            self._stack.append("TITLE")
+            self._text = []
+        elif tag in self._TEXT_BLOCKS:
+            self._flush_text()
+            self._stack.append("TEXT")
+            self._text = []
+        elif tag == "br":
+            target = self._text if self._stack else self._loose_text
+            target.append("\n")
+        elif tag == "img":
+            alt = _cleanup_text(str(dict(attrs).get("alt") or ""))
+            if alt:
+                self.blocks.append(("IMAGE", alt, "", []))
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in self._SKIP and self._skip_depth:
+            self._skip_depth -= 1
+            return
+        if self._skip_depth:
+            return
+        if self._table_depth:
+            self._table_html.append(f"</{tag}>")
+            if tag == "table":
+                self._table_depth -= 1
+                if self._table_depth == 0:
+                    table_html = "".join(self._table_html)
+                    self._table_html = []
+                    rows = _table_rows_from_html(table_html)
+                    text = _table_text(rows) if rows else _cleanup_text(re.sub(r"<[^>]+>", " ", table_html))
+                    if text or rows:
+                        self.blocks.append(("TABLE", text, table_html, rows))
+            return
+        if tag in self._HEADINGS or tag in self._TEXT_BLOCKS:
+            self._flush_text()
+            if self._stack:
+                self._stack.pop()
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth:
+            return
+        if self._table_depth:
+            self._table_html.append(html.escape(data))
+            return
+        if self._stack:
+            self._text.append(data)
+        else:
+            self._loose_text.append(data)
+
+    def close(self) -> None:
+        self._flush_text()
+        super().close()
+
+    def _flush_text(self) -> None:
+        if self._stack:
+            text = _cleanup_text("".join(self._text))
+            if text:
+                self.blocks.append((self._stack[-1], text, "", []))
+            self._text = []
+        else:
+            text = _cleanup_text("".join(self._loose_text))
+            if text:
+                self.blocks.append(("TEXT", text, "", []))
+            self._loose_text = []
+
+    def _serialize_start(self, tag: str, attrs: list[tuple[str, str | None]]) -> str:
+        parts = [f"<{tag}"]
+        for name, value in attrs:
+            if value is None:
+                parts.append(f" {name}")
+            else:
+                parts.append(f' {name}="{html.escape(value, quote=True)}"')
+        parts.append(">")
+        return "".join(parts)
+
+
 class _TableHtmlParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
         self.rows: list[list[str]] = []
-        self._current_row: list[str] | None = None
+        self._occupancy: set[tuple[int, int]] = set()
+        self._row_index = -1
+        self._in_row = False
         self._cell_buffer: list[str] | None = None
+        self._cell_rowspan = 1
+        self._cell_colspan = 1
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attr = {name.lower(): value for name, value in attrs}
         if tag == "tr":
-            self._current_row = []
-        elif tag in {"td", "th"} and self._current_row is not None:
+            self._row_index += 1
+            self._in_row = True
+            self._ensure_row(self._row_index)
+        elif tag in {"td", "th"} and self._in_row:
             self._cell_buffer = []
+            self._cell_rowspan = max(1, _to_int(attr.get("rowspan")) or 1)
+            self._cell_colspan = max(1, _to_int(attr.get("colspan")) or 1)
 
     def handle_endtag(self, tag: str) -> None:
-        if tag in {"td", "th"} and self._current_row is not None and self._cell_buffer is not None:
-            self._current_row.append(_cleanup_text("".join(self._cell_buffer)))
+        if tag in {"td", "th"} and self._cell_buffer is not None:
+            text = _cleanup_text("".join(self._cell_buffer))
+            column = self._next_free_column(self._row_index)
+            for row_offset in range(self._cell_rowspan):
+                row_no = self._row_index + row_offset
+                self._ensure_row(row_no)
+                for col_offset in range(self._cell_colspan):
+                    col_no = column + col_offset
+                    self._ensure_column(row_no, col_no)
+                    if row_offset == 0 and col_offset == 0:
+                        self.rows[row_no][col_no] = text
+                    elif not self.rows[row_no][col_no]:
+                        self.rows[row_no][col_no] = text
+                    self._occupancy.add((row_no, col_no))
             self._cell_buffer = None
-        elif tag == "tr" and self._current_row is not None:
-            if any(cell for cell in self._current_row):
-                self.rows.append(self._current_row)
-            self._current_row = None
+        elif tag == "tr":
+            self._in_row = False
 
     def handle_data(self, data: str) -> None:
         if self._cell_buffer is not None:
             self._cell_buffer.append(data)
+
+    def _next_free_column(self, row_no: int) -> int:
+        column = 0
+        while (row_no, column) in self._occupancy:
+            column += 1
+        return column
+
+    def _ensure_row(self, row_no: int) -> None:
+        while len(self.rows) <= row_no:
+            self.rows.append([])
+
+    def _ensure_column(self, row_no: int, col_no: int) -> None:
+        while len(self.rows[row_no]) <= col_no:
+            self.rows[row_no].append("")

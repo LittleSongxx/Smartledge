@@ -39,7 +39,7 @@ public class EvidenceApplicabilityService {
 
         boolean excludedOnly = excluded.stream().anyMatch(evidenceText::contains);
         if (excludedOnly) {
-            return EvidenceApplicabilityResult.notApplicable("evidence only supports excluded entity");
+            return EvidenceApplicabilityResult.unknown("advisory: evidence mentions excluded entity only");
         }
 
         return EvidenceApplicabilityResult.unknown("target entity not found in evidence");

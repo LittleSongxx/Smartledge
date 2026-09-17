@@ -28,6 +28,7 @@ import org.smartledge.ai.manage.mapper.SuperAgentKnowledgeScopeNodeMapper;
 import org.smartledge.ai.manage.mapper.SuperAgentKnowledgeTopicNodeMapper;
 import org.smartledge.ai.manage.mapper.SuperAgentKnowledgeRouteTraceMapper;
 import org.smartledge.ai.manage.mapper.SuperAgentTopicDocumentRelationMapper;
+import org.smartledge.ai.manage.service.DocumentAclStore;
 import org.smartledge.ai.manage.service.DocumentProfileService;
 import org.smartledge.ai.manage.service.KnowledgeBaseManageService;
 import org.smartledge.ai.manage.service.KnowledgeManageService;
@@ -62,6 +63,7 @@ public class KnowledgeManageServiceImpl implements KnowledgeManageService {
     private final SuperAgentDocumentMapper documentMapper;
     private final DocumentProfileService documentProfileService;
     private final KnowledgeBaseManageService knowledgeBaseManageService;
+    private final DocumentAclStore documentAclStore;
     private final UidGenerator uidGenerator;
 
     @Override
@@ -212,6 +214,7 @@ public class KnowledgeManageServiceImpl implements KnowledgeManageService {
     @Override
     public DocumentProfileVo queryProfile(DocumentProfileDetailQueryDto dto) {
         Long documentId = parseRequiredLong(dto == null ? null : dto.getDocumentId(), "documentId");
+        requireDocumentRead(documentId);
         SuperAgentDocumentProfile profile = documentProfileService.getByDocumentId(documentId)
             .orElseThrow(() -> new SuperAgentFrameException(BaseCode.PARAMETER_ERROR.getCode(), "文档画像不存在。"));
         return toProfileVo(profile);
@@ -220,6 +223,7 @@ public class KnowledgeManageServiceImpl implements KnowledgeManageService {
     @Override
     public DocumentProfileVo regenerateProfile(DocumentProfileRegenerateDto dto) {
         Long documentId = parseRequiredLong(dto == null ? null : dto.getDocumentId(), "documentId");
+        requireDocumentWrite(documentId);
         return toProfileVo(documentProfileService.regenerateProfile(documentId));
     }
 
@@ -228,6 +232,7 @@ public class KnowledgeManageServiceImpl implements KnowledgeManageService {
         List<Long> documentIds = dto == null || dto.getDocumentIds() == null
             ? List.of()
             : dto.getDocumentIds().stream().map(value -> parseRequiredLong(value, "documentId")).toList();
+        documentIds.forEach(this::requireDocumentWrite);
         return documentProfileService.batchRegenerateProfiles(documentIds).stream()
             .map(this::toProfileVo)
             .toList();
@@ -306,16 +311,20 @@ public class KnowledgeManageServiceImpl implements KnowledgeManageService {
         int pageNo = parseInteger(dto == null ? null : dto.getPageNo(), 1);
         int pageSize = parseInteger(dto == null ? null : dto.getPageSize(), 20);
         String conversationId = dto == null ? "" : safeText(dto.getConversationId());
+        Long tenantId = org.smartledge.database.tenant.TenantContext.get();
+        if (tenantId == null || tenantId <= 0) {
+            throw new SuperAgentFrameException(BaseCode.PARAMETER_ERROR.getCode(), "缺少租户上下文，无法查询路由追踪。");
+        }
         String mode = dto == null ? "" : safeText(dto.getMode());
         String routeStatus = dto == null ? "" : safeText(dto.getRouteStatus());
         LambdaQueryWrapper<org.smartledge.ai.manage.data.SuperAgentKnowledgeRouteTrace> wrapper =
             new LambdaQueryWrapper<org.smartledge.ai.manage.data.SuperAgentKnowledgeRouteTrace>()
+                .eq(org.smartledge.ai.manage.data.SuperAgentKnowledgeRouteTrace::getTenantId, tenantId)
+                .eq(StrUtil.isNotBlank(conversationId),
+                    org.smartledge.ai.manage.data.SuperAgentKnowledgeRouteTrace::getConversationId, conversationId)
                 .eq(org.smartledge.ai.manage.data.SuperAgentKnowledgeRouteTrace::getStatus, BusinessStatus.YES.getCode())
                 .orderByDesc(org.smartledge.ai.manage.data.SuperAgentKnowledgeRouteTrace::getCreateTime,
                     org.smartledge.ai.manage.data.SuperAgentKnowledgeRouteTrace::getId);
-        if (StrUtil.isNotBlank(conversationId)) {
-            wrapper.eq(org.smartledge.ai.manage.data.SuperAgentKnowledgeRouteTrace::getConversationId, conversationId);
-        }
         if (StrUtil.isNotBlank(mode)) {
             wrapper.eq(org.smartledge.ai.manage.data.SuperAgentKnowledgeRouteTrace::getMode, mode);
         }
@@ -540,5 +549,31 @@ public class KnowledgeManageServiceImpl implements KnowledgeManageService {
             return primary.trim();
         }
         return StrUtil.blankToDefault(fallback, "");
+    }
+
+    private void requireDocumentRead(Long documentId) {
+        org.smartledge.database.tenant.RequestIdentity identity = requireOperator();
+        if (identity.hasPermission("document:read-all")) {
+            return;
+        }
+        if (!documentAclStore.visibleDocumentIds(List.of(documentId), identity).contains(documentId)) {
+            throw new SuperAgentFrameException(403, "当前账号没有查看该文档的权限");
+        }
+    }
+
+    private void requireDocumentWrite(Long documentId) {
+        org.smartledge.database.tenant.RequestIdentity identity = requireOperator();
+        if (!documentAclStore.writableDocumentIds(List.of(documentId), identity).contains(documentId)) {
+            throw new SuperAgentFrameException(403, "当前账号没有修改该文档的权限");
+        }
+    }
+
+    private org.smartledge.database.tenant.RequestIdentity requireOperator() {
+        org.smartledge.database.tenant.RequestIdentity identity =
+            org.smartledge.database.tenant.TenantContext.getIdentity();
+        if (identity == null) {
+            throw new SuperAgentFrameException(401, "请先登录");
+        }
+        return identity;
     }
 }

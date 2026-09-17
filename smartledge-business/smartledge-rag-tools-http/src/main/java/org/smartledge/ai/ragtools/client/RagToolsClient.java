@@ -13,6 +13,8 @@ import org.smartledge.ai.ragtools.model.RagToolsDocumentParseRequest;
 import org.smartledge.ai.ragtools.model.RagToolsEmbedRequest;
 import org.smartledge.ai.ragtools.model.RagToolsEmbedResponse;
 import org.smartledge.ai.ragtools.model.RagToolsDocumentParseResponse;
+import org.smartledge.ai.ragtools.model.RagToolsGraphCommunityRequest;
+import org.smartledge.ai.ragtools.model.RagToolsGraphCommunityResponse;
 import org.smartledge.ai.ragtools.model.RagToolsGraphExtractRequest;
 import org.smartledge.ai.ragtools.model.RagToolsGraphExtractResponse;
 import org.smartledge.ai.ragtools.model.RagToolsHealthResponse;
@@ -126,6 +128,11 @@ public class RagToolsClient {
 
     public RagToolsRerankResponse rerank(RagToolsRerankRequest request) {
         return invoke("/rerank", () -> post(restClient, "/rerank", request, RagToolsRerankResponse.class));
+    }
+
+    public RagToolsGraphCommunityResponse detectCommunities(RagToolsGraphCommunityRequest request) {
+        return invoke("/graph/communities",
+            () -> post(restClient, "/graph/communities", request, RagToolsGraphCommunityResponse.class));
     }
 
     public RagToolsDocumentParseResponse parseDocument(RagToolsDocumentParseRequest request) {

@@ -114,7 +114,7 @@ public class DefaultEvaluationExchangeSnapshotProjection implements EvaluationEx
         EvaluationExchangeSnapshot.Scope scope = scope(facts, planMap);
         EvaluationExchangeSnapshot.Prompt prompt = prompt(budgetSnapshot, schemaVersion);
         EvaluationExchangeSnapshot.Citation citation = citation(budgetSnapshot, citationSnapshot);
-        EvaluationExchangeSnapshot.Archive archive = archive(facts);
+        EvaluationExchangeSnapshot.Archive archive = archive(facts, citationSnapshot);
         List<String> observedSelected = facts.retrievalResults().stream()
             .filter(Objects::nonNull)
             .filter(RetrievalResultView::isSelected)
@@ -125,6 +125,8 @@ public class DefaultEvaluationExchangeSnapshotProjection implements EvaluationEx
             .toList();
         List<String> finalizeIdentities = strings(finalizeSnapshot.get("sourceSnapshotIdentities"));
         List<String> citationSnapshotIdentities = strings(citationSnapshot.get("sourceSnapshotIdentities"));
+        List<String> retrievedIdentities = retrievedIdentities(citationSnapshot, prompt.renderedSourceIdentities());
+        List<String> finalizeRetrievedIdentities = strings(finalizeSnapshot.get("retrievedSourceIdentities"));
         EvaluationExchangeSnapshot.Conservation conservation = conservation(
             prompt.renderedSourceIdentities(),
             citation.boundIdentities(),
@@ -132,6 +134,10 @@ public class DefaultEvaluationExchangeSnapshotProjection implements EvaluationEx
             archive.sourceSnapshotIdentities(),
             finalizeIdentities,
             observedSelected,
+            retrievedIdentities,
+            archive.retrievedSourceIdentities() == null ? List.of() : archive.retrievedSourceIdentities(),
+            finalizeRetrievedIdentities,
+            finalizeSnapshot.containsKey("retrievedSourceIdentities"),
             stages
         );
         EvaluationExchangeSnapshot.Provenance provenance = provenance(facts, scope, prompt);
@@ -615,7 +621,10 @@ public class DefaultEvaluationExchangeSnapshotProjection implements EvaluationEx
 
     private EvaluationExchangeSnapshot.Citation citation(Map<String, Object> budget,
                                                           Map<String, Object> binding) {
-        List<String> eligible = strings(binding.get("renderedSourceIdentities"));
+        List<String> eligible = strings(binding.get("retrievedSourceIdentities"));
+        if (eligible.isEmpty()) {
+            eligible = strings(binding.get("renderedSourceIdentities"));
+        }
         if (eligible.isEmpty()) {
             eligible = strings(budget.get("explicitCitationEligibleIdentities"));
         }
@@ -630,18 +639,40 @@ public class DefaultEvaluationExchangeSnapshotProjection implements EvaluationEx
         );
     }
 
-    private EvaluationExchangeSnapshot.Archive archive(EvaluationExchangeSnapshotFacts facts) {
+    private EvaluationExchangeSnapshot.Archive archive(EvaluationExchangeSnapshotFacts facts,
+                                                       Map<String, Object> citationSnapshot) {
+        List<String> retrieved = facts.archiveReferences().stream()
+            .filter(Objects::nonNull)
+            .filter(reference -> !reference.isContextOnly())
+            .map(reference -> {
+                String identity = reference.getCitationIdentity();
+                return StrUtil.isNotBlank(identity) ? identity : reference.uniqueKey();
+            })
+            .filter(StrUtil::isNotBlank)
+            .distinct()
+            .toList();
+        List<String> explicit = strings(citationSnapshot.get("explicitCitationIdentities"));
+        if (explicit.isEmpty()) {
+            explicit = strings(citationSnapshot.get("sourceSnapshotIdentities"));
+        }
         return new EvaluationExchangeSnapshot.Archive(
             facts.status().name(),
             redactor.redactText(facts.errorMessage()),
-            facts.archiveReferences().stream()
-                .filter(Objects::nonNull)
-                .filter(reference -> !reference.isContextOnly())
-                .map(SearchReference::getCitationIdentity)
-                .filter(StrUtil::isNotBlank)
-                .distinct()
-                .toList()
+            explicit,
+            retrieved,
+            explicit
         );
+    }
+
+    private List<String> retrievedIdentities(Map<String, Object> citationSnapshot, List<String> promptRendered) {
+        List<String> retrieved = strings(citationSnapshot.get("retrievedSourceIdentities"));
+        if (retrieved.isEmpty()) {
+            retrieved = strings(citationSnapshot.get("renderedSourceIdentities"));
+        }
+        if (retrieved.isEmpty()) {
+            return promptRendered;
+        }
+        return retrieved;
     }
 
     private EvaluationExchangeSnapshot.Conservation conservation(List<String> promptEligible,
@@ -650,6 +681,10 @@ public class DefaultEvaluationExchangeSnapshotProjection implements EvaluationEx
                                                                   List<String> archive,
                                                                   List<String> finalizeIdentities,
                                                                   List<String> observedSelected,
+                                                                  List<String> retrieved,
+                                                                  List<String> archiveRetrieved,
+                                                                  List<String> finalizeRetrieved,
+                                                                  boolean finalizeHasRetrieved,
                                                                   Map<String, ConversationTraceStageView> stages) {
         List<String> reasons = new ArrayList<>();
         if (!stages.containsKey("EVIDENCE_BUDGET")) {
@@ -664,6 +699,12 @@ public class DefaultEvaluationExchangeSnapshotProjection implements EvaluationEx
         if (!new LinkedHashSet<>(promptEligible).containsAll(bound)) {
             reasons.add("BOUND_IDENTITY_OUTSIDE_PROMPT_ELIGIBILITY");
         }
+        if (!new LinkedHashSet<>(retrieved).containsAll(bound)) {
+            reasons.add("BOUND_IDENTITY_OUTSIDE_RETRIEVED_SOURCES");
+        }
+        if (!retrieved.equals(promptEligible)) {
+            reasons.add("RETRIEVED_SOURCE_PROMPT_MISMATCH");
+        }
         if (!bound.equals(citationSnapshot)) {
             reasons.add("CITATION_SOURCE_SNAPSHOT_MISMATCH");
         }
@@ -672,6 +713,12 @@ public class DefaultEvaluationExchangeSnapshotProjection implements EvaluationEx
         }
         if (!bound.equals(finalizeIdentities)) {
             reasons.add("FINALIZE_SOURCE_SNAPSHOT_MISMATCH");
+        }
+        if (!archiveRetrieved.equals(retrieved)) {
+            reasons.add("ARCHIVE_RETRIEVED_SOURCE_MISMATCH");
+        }
+        if (finalizeHasRetrieved && !finalizeRetrieved.equals(retrieved)) {
+            reasons.add("FINALIZE_RETRIEVED_SOURCE_MISMATCH");
         }
         if (!new LinkedHashSet<>(observedSelected).containsAll(promptEligible)) {
             reasons.add("PROMPT_SOURCE_NOT_IN_OBSERVED_SELECTION");
@@ -686,7 +733,10 @@ public class DefaultEvaluationExchangeSnapshotProjection implements EvaluationEx
             finalizeIdentities,
             observedSelected,
             status,
-            List.copyOf(reasons)
+            List.copyOf(reasons),
+            retrieved,
+            archiveRetrieved,
+            finalizeRetrieved
         );
     }
 
@@ -736,93 +786,33 @@ public class DefaultEvaluationExchangeSnapshotProjection implements EvaluationEx
                                                                  EvaluationExchangeSnapshot.Provenance provenance,
                                                                  Map<String, Object> plan,
                                                                  EvaluationExchangeSnapshot.QueryHints queryHints) {
-        List<String> deterministic = new ArrayList<>();
-        deterministic.addAll(facts.factErrors());
-        if (facts.createdAt() == null) {
-            deterministic.add("MISSING_EXCHANGE_CREATED_AT");
-        }
-        if (facts.terminalAt() == null) {
-            deterministic.add("MISSING_EXCHANGE_TERMINAL_AT");
-        }
-        if (!"CONSERVED".equals(conservation.status())) {
-            deterministic.addAll(conservation.reasons());
-        }
-        if (provenance.codeCommit().isBlank()) {
-            deterministic.add("MISSING_CODE_COMMIT");
-        }
-        if (provenance.promptVersion().isBlank()) {
-            deterministic.add("MISSING_PROMPT_VERSION");
-        }
-        if (provenance.actualModels().isEmpty()) {
-            deterministic.add("MISSING_ACTUAL_MODEL_IDENTITY");
-        }
-        if (provenance.effectiveConfig().isEmpty()) {
-            deterministic.add("MISSING_EFFECTIVE_CONFIG");
-        }
-        if (provenance.documentContentVersions().isEmpty()) {
-            deterministic.add("MISSING_DOCUMENT_CONTENT_VERSION");
-        }
-
-        List<String> retrieval = new ArrayList<>();
-        if (plan.isEmpty()) {
-            retrieval.add("MISSING_RETRIEVAL_PLAN");
-        }
-        if (facts.channelExecutions().isEmpty()) {
-            retrieval.add("MISSING_CHANNEL_EXECUTION");
-        }
-        if (queryHints != null
+        boolean graphHintProjectedButNotConsumed = queryHints != null
+            && queryHints.entityHints() != null
             && "NOT_CONSUMED".equals(queryHints.entityHints().consumptionStatus())
             && queryHints.entityHints().projected() instanceof Collection<?> projectedHints
-            && !projectedHints.isEmpty()) {
-            retrieval.add("MISSING_GRAPH_RAG_HINT_CONSUMPTION_FACT");
-        }
-
-        List<String> answer = terminalScoringReasons(facts, true);
-        List<String> faithfulness = terminalScoringReasons(facts, true);
-        if (prompt.manifest().isEmpty()) {
-            faithfulness.add("MISSING_PROMPT_MANIFEST");
-        }
-        if (prompt.renderedSourceIdentities().isEmpty()) {
-            faithfulness.add("NO_RENDERED_SOURCE_EVIDENCE");
-        }
-
-        List<String> citationSupport = terminalScoringReasons(facts, true);
-        if (!stages.containsKey("CITATION_BINDING")) {
-            citationSupport.add("MISSING_CITATION_BINDING");
-        }
-        if (citation.eligibleIdentities().isEmpty()) {
-            citationSupport.add("NO_CITATION_ELIGIBLE_SOURCE");
-        }
-        if ("VIOLATED".equals(conservation.status())) {
-            citationSupport.add("IDENTITY_CONSERVATION_VIOLATED");
-        }
-
-        return List.of(
-            ready("DETERMINISTIC_CONTRACT", deterministic),
-            ready("RETRIEVAL_RELEVANCE", retrieval),
-            ready("ANSWER_RELEVANCE", answer),
-            ready("FAITHFULNESS", faithfulness),
-            ready("CITATION_SUPPORT", citationSupport)
-        );
-    }
-
-    private List<String> terminalScoringReasons(EvaluationExchangeSnapshotFacts facts, boolean requireAnswer) {
-        List<String> reasons = new ArrayList<>();
-        if (facts.status() != ChatTurnStatus.COMPLETED) {
-            reasons.add("TERMINAL_STATUS_" + facts.status().name());
-        }
-        if (StrUtil.isBlank(facts.question())) {
-            reasons.add("MISSING_ORIGINAL_QUESTION");
-        }
-        if (requireAnswer && StrUtil.isBlank(facts.answer())) {
-            reasons.add("MISSING_FINAL_ANSWER");
-        }
-        return reasons;
-    }
-
-    private EvaluationExchangeSnapshot.Readiness ready(String family, List<String> reasons) {
-        List<String> unique = reasons.stream().distinct().toList();
-        return new EvaluationExchangeSnapshot.Readiness(family, unique.isEmpty(), unique);
+            && !projectedHints.isEmpty();
+        return EvaluationContractReadiness.evaluate(new EvaluationContractReadiness.Request(
+            facts.factErrors(),
+            facts.createdAt() != null,
+            facts.terminalAt() != null,
+            conservation.status(),
+            conservation.reasons(),
+            !provenance.codeCommit().isBlank(),
+            !provenance.promptVersion().isBlank(),
+            !provenance.actualModels().isEmpty(),
+            !provenance.effectiveConfig().isEmpty(),
+            !provenance.documentContentVersions().isEmpty(),
+            !plan.isEmpty(),
+            !facts.channelExecutions().isEmpty(),
+            graphHintProjectedButNotConsumed,
+            facts.status() == null ? "" : facts.status().name(),
+            StrUtil.isNotBlank(facts.question()),
+            StrUtil.isNotBlank(facts.answer()),
+            !prompt.manifest().isEmpty(),
+            !prompt.renderedSourceIdentities().isEmpty(),
+            stages.containsKey("CITATION_BINDING"),
+            citation.eligibleIdentities() != null && !citation.eligibleIdentities().isEmpty()
+        ));
     }
 
     private EvaluationExchangeSnapshot.Diagnostics diagnostics(boolean included,

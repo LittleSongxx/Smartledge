@@ -57,6 +57,8 @@ import java.util.regex.Pattern;
 public class RetrievalPlanAssembler {
 
     private static final Pattern YEAR_PATTERN = Pattern.compile("\\b(20\\d{2})\\b");
+    private static final Pattern DOCUMENT_TITLE_PATTERN = Pattern.compile("《([^》]{2,80})》");
+    private static final Pattern DOCUMENT_FILE_PATTERN = Pattern.compile("([\\w\\u4e00-\\u9fff.-]{2,80}\\.(?:pdf|md|txt|docx|png))", Pattern.CASE_INSENSITIVE);
     private static final Pattern DECIMAL_SECTION_PATTERN = Pattern.compile("(?<!\\d)(\\d+(?:\\.\\d+)+)(?!\\d)");
     private static final Pattern NAMED_SECTION_PATTERN = Pattern.compile("(第\\s*[一二三四五六七八九十百0-9]+\\s*[章节条部分])|(附录\\s*[A-Za-z一二三四五六七八九十0-9]+)");
     private static final double STRUCTURE_FILTER_CONFIDENCE_THRESHOLD = 0.65D;
@@ -74,13 +76,16 @@ public class RetrievalPlanAssembler {
         RagRuntimeOptions.HybridOptions hybrid = runtime.getHybrid() == null
             ? RagRuntimeOptions.HybridOptions.from(null)
             : runtime.getHybrid();
+        TableIntent tableIntent = buildTableIntent(understanding);
+        GraphIntent graphIntent = buildGraphIntent(understanding, runtime);
+        RaptorIntent raptorIntent = buildRaptorIntent(understanding, runtime);
 
         List<RetrievalChannelPlan> channels = List.of(
             channel(RetrievalChannelEnum.VECTOR, true, runtime.getVectorTopK(), runtime.getChannelTimeoutMs(), hybrid.getVectorWeight(), runtime.getMinVectorSimilarity(), 0D),
             channel(RetrievalChannelEnum.KEYWORD, runtime.isKeywordChannelEnabled(), runtime.getKeywordTopK(), runtime.getChannelTimeoutMs(), hybrid.getKeywordWeight(), 0D, runtime.getKeywordRelativeScoreFloor()),
-            channel(RetrievalChannelEnum.TABLE, runtime.isTableChannelEnabled(), runtime.getCandidateTopK(), runtime.getChannelTimeoutMs(), hybrid.getTableWeight(), 0D, 0D),
-            channel(RetrievalChannelEnum.GRAPH_RAG, runtime.isGraphRagChannelEnabled(), runtime.getGraphRagTopK(), runtime.getChannelTimeoutMs(), hybrid.getGraphRagWeight(), 0D, 0D),
-            channel(RetrievalChannelEnum.RAPTOR, runtime.isRaptorChannelEnabled(), runtime.getRaptorTopK(), runtime.getChannelTimeoutMs(), hybrid.getRaptorWeight(), 0D, 0D)
+            channel(RetrievalChannelEnum.TABLE, expensiveChannelEnabled(runtime.isTableChannelEnabled(), tableIntent.isRequested(), runtime.isForceExpensiveChannels()), runtime.getCandidateTopK(), runtime.getChannelTimeoutMs(), hybrid.getTableWeight(), 0D, 0D),
+            channel(RetrievalChannelEnum.GRAPH_RAG, expensiveChannelEnabled(runtime.isGraphRagChannelEnabled(), graphIntent.isRequested(), runtime.isForceExpensiveChannels()), runtime.getGraphRagTopK(), runtime.getChannelTimeoutMs(), hybrid.getGraphRagWeight(), 0D, 0D),
+            channel(RetrievalChannelEnum.RAPTOR, expensiveChannelEnabled(runtime.isRaptorChannelEnabled(), raptorIntent.isRequested(), runtime.isForceExpensiveChannels()), runtime.getRaptorTopK(), runtime.getChannelTimeoutMs(), hybrid.getRaptorWeight(), 0D, 0D)
         );
 
         RetrievalPlan plan = RetrievalPlan.builder()
@@ -101,9 +106,9 @@ public class RetrievalPlanAssembler {
             .structureNavigationResult(copyStructureNavigationResult(input.getNavigationDecision()))
             .structureAnchor(copyStructureAnchor(input.getNavigationDecision()))
             .itemAnchor(copyItemAnchor(input.getNavigationDecision()))
-            .tableIntent(buildTableIntent(understanding))
-            .graphIntent(buildGraphIntent(understanding, runtime))
-            .raptorIntent(buildRaptorIntent(understanding, runtime))
+            .tableIntent(tableIntent)
+            .graphIntent(graphIntent)
+            .raptorIntent(raptorIntent)
             .routePlan(buildRoutePlan(input))
             .rankFeatures(buildRankFeatures(hybrid))
             .candidateWindow(runtime.getCandidateTopK())
@@ -207,12 +212,17 @@ public class RetrievalPlanAssembler {
     private RetrievalMetadataFilters buildMetadataFilters(String normalizedQuery, QueryUnderstandingResult understanding) {
         LinkedHashSet<String> sections = new LinkedHashSet<>();
         LinkedHashSet<String> years = new LinkedHashSet<>();
-        collectMatches(DECIMAL_SECTION_PATTERN, normalizedQuery, sections);
-        collectMatches(NAMED_SECTION_PATTERN, normalizedQuery, sections);
+        if (hasAuthorizedStructureFilter(understanding)) {
+            collectMatches(DECIMAL_SECTION_PATTERN, normalizedQuery, sections);
+            collectMatches(NAMED_SECTION_PATTERN, normalizedQuery, sections);
+        }
         collectAuthorizedStructureSections(understanding, sections);
         collectMatches(YEAR_PATTERN, normalizedQuery, years);
+        LinkedHashSet<String> documentNames = new LinkedHashSet<>();
+        collectMatches(DOCUMENT_TITLE_PATTERN, normalizedQuery, documentNames);
+        collectMatches(DOCUMENT_FILE_PATTERN, normalizedQuery, documentNames);
         return RetrievalMetadataFilters.builder()
-            .documentNameHints(List.of())
+            .documentNameHints(documentNames.stream().limit(8).toList())
             .sectionPathHints(sections.stream().limit(8).toList())
             .yearHints(years.stream().limit(8).toList())
             .entityHints(normalizeStrings(understanding == null ? null : understanding.getEntities(), 8))
@@ -371,7 +381,7 @@ public class RetrievalPlanAssembler {
 
     private RankFeatureBundle buildRankFeatures(RagRuntimeOptions.HybridOptions hybrid) {
         return RankFeatureBundle.builder()
-            .enabledFeatures(List.of("CHANNEL_RRF", "ORIGINAL_SCORE", "PERSISTED_METADATA"))
+            .enabledFeatures(List.of("CHANNEL_RRF"))
             .rankWeight(hybrid.getRankWeight())
             .originalScoreWeight(hybrid.getOriginalScoreWeight())
             .metadataBoostWeight(hybrid.getMetadataBoostWeight())
@@ -574,6 +584,10 @@ public class RetrievalPlanAssembler {
             .structureNodeId(anchor.getStructureNodeId())
             .canonicalPath(anchor.getCanonicalPath())
             .build();
+    }
+
+    private boolean expensiveChannelEnabled(boolean masterEnabled, boolean requested, boolean force) {
+        return masterEnabled && (requested || force);
     }
 
     private boolean channelRequested(QueryUnderstandingResult understanding, QueryType queryType, RetrievalIntent intent) {

@@ -30,4 +30,6 @@ public class KnowledgeBaseItemVo {
     private String documentCount;
 
     private String retrievableDocumentCount;
+
+    private String editTime;
 }

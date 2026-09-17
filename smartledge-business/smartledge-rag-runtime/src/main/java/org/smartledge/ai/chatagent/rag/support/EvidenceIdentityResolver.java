@@ -4,6 +4,7 @@ import cn.hutool.core.util.StrUtil;
 import org.smartledge.ai.chatagent.model.SearchReference;
 import org.smartledge.ai.chatagent.rag.model.CitationEvidenceType;
 import org.smartledge.ai.chatagent.rag.model.EvidenceIdentity;
+import org.smartledge.ai.chatagent.rag.model.EvidenceKind;
 import org.smartledge.ai.rag.runtime.support.DocumentKnowledgeMetadataKeys;
 import org.smartledge.ai.rag.runtime.model.RetrievalDocument;
 
@@ -22,32 +23,7 @@ public final class EvidenceIdentityResolver {
         if (document == null || document.getMetadata() == null) {
             return null;
         }
-        Map<String, Object> metadata = document.getMetadata();
-        if (isExplicitContextArtifact(metadata)) {
-            return null;
-        }
-        Long documentId = asLong(metadata.get(DocumentKnowledgeMetadataKeys.DOCUMENT_ID));
-        Long chunkId = asLong(metadata.get(DocumentKnowledgeMetadataKeys.CHUNK_ID));
-        Long kgEvidenceId = asLong(metadata.get(DocumentKnowledgeMetadataKeys.KG_EVIDENCE_ID));
-        Long tableId = asLong(metadata.get(DocumentKnowledgeMetadataKeys.TABLE_ID));
-
-        if (isTableEvidence(metadata)) {
-            return EvidenceIdentity.citation("TABLE:" + tableId + ":" + tableEvidenceKey(metadata), CitationEvidenceType.TABLE_CELL_OR_ROW);
-        }
-        if (isGraphRagQuoteEvidence(metadata, document.getText())) {
-            String sourceChunk = chunkId == null ? "" : ":CHUNK:" + chunkId;
-            return EvidenceIdentity.citation("KG_QUOTE:" + kgEvidenceId + sourceChunk, CitationEvidenceType.KG_QUOTE_SOURCE);
-        }
-        if (isRaptorSourceChunk(metadata)
-            && documentId != null
-            && chunkId != null
-            && StrUtil.isNotBlank(safeText(metadata.get(DocumentKnowledgeMetadataKeys.ORIGINAL_SNIPPET)))) {
-            return EvidenceIdentity.citation("CHUNK:" + documentScope(documentId) + chunkId, CitationEvidenceType.RAPTOR_SOURCE_CHUNK);
-        }
-        if (isRawDocumentChunk(metadata) && documentId != null && chunkId != null) {
-            return EvidenceIdentity.citation("CHUNK:" + documentScope(documentId) + chunkId, CitationEvidenceType.CHUNK);
-        }
-        return null;
+        return citationIdentityFromMetadata(document.getMetadata(), document.getText());
     }
 
     public static EvidenceIdentity contextIdentity(RetrievalDocument document) {
@@ -86,8 +62,8 @@ public final class EvidenceIdentityResolver {
         if (reference == null) {
             return null;
         }
-        if (reference.isContextOnly() && !reference.isSourceEvidenceResolved()) {
-            return null;
+        if (isWebReference(reference) && StrUtil.isNotBlank(reference.getUrl())) {
+            return EvidenceIdentity.citation("WEB:" + reference.getUrl().trim(), CitationEvidenceType.WEB);
         }
         if (isTableEvidence(reference)) {
             return EvidenceIdentity.citation("TABLE:" + reference.getTableId() + ":" + tableEvidenceKey(reference), CitationEvidenceType.TABLE_CELL_OR_ROW);
@@ -95,14 +71,39 @@ public final class EvidenceIdentityResolver {
         if (reference.getKgEvidenceId() != null && reference.getChunkId() != null && StrUtil.isNotBlank(reference.getQuoteText())) {
             return EvidenceIdentity.citation("KG_QUOTE:" + reference.getKgEvidenceId() + ":CHUNK:" + reference.getChunkId(), CitationEvidenceType.KG_QUOTE_SOURCE);
         }
+        if (isGraphCommunitySummary(reference)) {
+            String communityKey = firstNonBlank(reference.getKgCrossDocumentCommunityKey(),
+                reference.getKgEvidenceId() == null ? "" : String.valueOf(reference.getKgEvidenceId()));
+            if (StrUtil.isNotBlank(communityKey)) {
+                return EvidenceIdentity.citation("SUMMARY:KG:" + communityKey, CitationEvidenceType.SUMMARY);
+            }
+        }
         if (isRaptorSourceChunk(reference)
             && reference.getDocumentId() != null
             && reference.getChunkId() != null
             && StrUtil.isNotBlank(reference.getQuoteText())) {
             return EvidenceIdentity.citation("CHUNK:" + documentScope(reference.getDocumentId()) + reference.getChunkId(), CitationEvidenceType.RAPTOR_SOURCE_CHUNK);
         }
+        if (isRaptorParent(reference)) {
+            return EvidenceIdentity.citation(
+                "PARENT:" + documentScope(reference.getDocumentId()) + reference.getParentBlockId(),
+                CitationEvidenceType.PARENT
+            );
+        }
+        if (isRaptorSummary(reference)) {
+            return EvidenceIdentity.citation("SUMMARY:RAPTOR:" + reference.getRaptorNodeId(), CitationEvidenceType.SUMMARY);
+        }
+        if (isParentEvidence(reference)) {
+            return EvidenceIdentity.citation(
+                "PARENT:" + documentScope(reference.getDocumentId()) + reference.getParentBlockId(),
+                CitationEvidenceType.PARENT
+            );
+        }
         if (reference.getDocumentId() != null && reference.getChunkId() != null && isRawDocumentChunk(reference)) {
             return EvidenceIdentity.citation("CHUNK:" + documentScope(reference.getDocumentId()) + reference.getChunkId(), CitationEvidenceType.CHUNK);
+        }
+        if (StrUtil.isNotBlank(reference.getToolName()) && StrUtil.isNotBlank(reference.getCitationIdentity())) {
+            return EvidenceIdentity.citation(reference.getCitationIdentity(), CitationEvidenceType.TOOL);
         }
         return null;
     }
@@ -156,19 +157,8 @@ public final class EvidenceIdentityResolver {
     }
 
     public static boolean isContextOnly(SearchReference reference) {
-        String sourceType = StrUtil.blankToDefault(reference.getSourceType(), "");
-        if ("GRAPH_RAG".equalsIgnoreCase(sourceType) && (reference.getKgEvidenceId() == null || StrUtil.isBlank(reference.getQuoteText()))) {
-            return true;
-        }
-        if (reference.getRaptorNodeId() != null && !isRaptorSourceChunk(reference)) {
-            return true;
-        }
-        if (reference.getChunkId() != null && !isRawDocumentChunk(reference) && !isTableEvidence(reference)
-            && !(reference.getKgEvidenceId() != null && StrUtil.isNotBlank(reference.getQuoteText()))
-            && !isRaptorSourceChunk(reference)) {
-            return true;
-        }
-        return false;
+        EvidenceIdentity identity = citationIdentity(reference);
+        return identity == null || !identity.present() || !identity.citationCapable();
     }
 
     public static String citationIdentityValue(RetrievalDocument document) {
@@ -205,6 +195,70 @@ public final class EvidenceIdentityResolver {
     public static CitationEvidenceType citationEvidenceType(RetrievalDocument document) {
         EvidenceIdentity identity = citationIdentity(document);
         return identity == null ? CitationEvidenceType.CONTEXT_ONLY : identity.type();
+    }
+
+    public static EvidenceKind evidenceKind(RetrievalDocument document) {
+        return EvidenceKind.from(citationEvidenceType(document));
+    }
+
+    private static EvidenceIdentity citationIdentityFromMetadata(Map<String, Object> metadata, String text) {
+        Long documentId = asLong(metadata.get(DocumentKnowledgeMetadataKeys.DOCUMENT_ID));
+        Long chunkId = asLong(metadata.get(DocumentKnowledgeMetadataKeys.CHUNK_ID));
+        Long parentBlockId = asLong(metadata.get(DocumentKnowledgeMetadataKeys.PARENT_BLOCK_ID));
+        Long kgEvidenceId = asLong(metadata.get(DocumentKnowledgeMetadataKeys.KG_EVIDENCE_ID));
+        Long tableId = asLong(metadata.get(DocumentKnowledgeMetadataKeys.TABLE_ID));
+        Long raptorNodeId = asLong(metadata.get(DocumentKnowledgeMetadataKeys.RAPTOR_NODE_ID));
+        String sourceType = safeText(metadata.get(DocumentKnowledgeMetadataKeys.SOURCE_TYPE));
+        String url = safeText(metadata.get(DocumentKnowledgeMetadataKeys.URL));
+        String toolName = safeText(metadata.get(DocumentKnowledgeMetadataKeys.TOOL_NAME));
+
+        if ("WEB".equalsIgnoreCase(sourceType) && StrUtil.isNotBlank(url)) {
+            return EvidenceIdentity.citation("WEB:" + url, CitationEvidenceType.WEB);
+        }
+        if (isTableEvidence(metadata)) {
+            return EvidenceIdentity.citation("TABLE:" + tableId + ":" + tableEvidenceKey(metadata), CitationEvidenceType.TABLE_CELL_OR_ROW);
+        }
+        if (isGraphRagQuoteEvidence(metadata, text)) {
+            String sourceChunk = chunkId == null ? "" : ":CHUNK:" + chunkId;
+            return EvidenceIdentity.citation("KG_QUOTE:" + kgEvidenceId + sourceChunk, CitationEvidenceType.KG_QUOTE_SOURCE);
+        }
+        if (isGraphCommunitySummary(metadata)) {
+            String communityKey = firstNonBlank(
+                safeText(metadata.get(DocumentKnowledgeMetadataKeys.KG_CROSS_DOCUMENT_COMMUNITY_KEY)),
+                safeText(metadata.get(DocumentKnowledgeMetadataKeys.KG_COMMUNITY_ID)),
+                kgEvidenceId == null ? "" : String.valueOf(kgEvidenceId)
+            );
+            if (StrUtil.isNotBlank(communityKey)) {
+                return EvidenceIdentity.citation("SUMMARY:KG:" + communityKey, CitationEvidenceType.SUMMARY);
+            }
+        }
+        if (isRaptorSourceChunk(metadata)
+            && documentId != null
+            && chunkId != null
+            && StrUtil.isNotBlank(safeText(metadata.get(DocumentKnowledgeMetadataKeys.ORIGINAL_SNIPPET)))) {
+            return EvidenceIdentity.citation("CHUNK:" + documentScope(documentId) + chunkId, CitationEvidenceType.RAPTOR_SOURCE_CHUNK);
+        }
+        if (isRaptorParent(metadata) && parentBlockId != null) {
+            return EvidenceIdentity.citation("PARENT:" + documentScope(documentId) + parentBlockId, CitationEvidenceType.PARENT);
+        }
+        if (isRaptorSummary(metadata) && raptorNodeId != null) {
+            return EvidenceIdentity.citation("SUMMARY:RAPTOR:" + raptorNodeId, CitationEvidenceType.SUMMARY);
+        }
+        if (isParentEvidence(metadata) && parentBlockId != null) {
+            return EvidenceIdentity.citation("PARENT:" + documentScope(documentId) + parentBlockId, CitationEvidenceType.PARENT);
+        }
+        if (isRawDocumentChunk(metadata) && documentId != null && chunkId != null) {
+            return EvidenceIdentity.citation("CHUNK:" + documentScope(documentId) + chunkId, CitationEvidenceType.CHUNK);
+        }
+        if (StrUtil.isNotBlank(toolName) && (chunkId != null || parentBlockId != null)) {
+            if (chunkId != null && documentId != null) {
+                return EvidenceIdentity.citation("CHUNK:" + documentScope(documentId) + chunkId, CitationEvidenceType.CHUNK);
+            }
+            if (parentBlockId != null) {
+                return EvidenceIdentity.citation("PARENT:" + documentScope(documentId) + parentBlockId, CitationEvidenceType.PARENT);
+            }
+        }
+        return null;
     }
 
     private static boolean samePresentIdentity(EvidenceIdentity left, EvidenceIdentity right) {
@@ -256,8 +310,83 @@ public final class EvidenceIdentityResolver {
         return "SOURCE_CHUNK".equalsIgnoreCase(StrUtil.blankToDefault(reference.getRaptorSourceStatus(), ""));
     }
 
-    private static boolean isExplicitContextArtifact(Map<String, Object> metadata) {
-        return StrUtil.isNotBlank(safeText(metadata.get(DocumentKnowledgeMetadataKeys.CONTEXT_ARTIFACT)));
+    private static boolean isGraphCommunitySummary(Map<String, Object> metadata) {
+        if (asBoolean(metadata.get(DocumentKnowledgeMetadataKeys.KG_COMMUNITY_SUMMARY_ONLY))) {
+            return true;
+        }
+        if (!"GRAPH_RAG".equalsIgnoreCase(safeText(metadata.get(DocumentKnowledgeMetadataKeys.SOURCE_TYPE)))) {
+            return false;
+        }
+        if (isGraphRagQuoteEvidence(metadata, safeText(metadata.get(DocumentKnowledgeMetadataKeys.ORIGINAL_SNIPPET)))) {
+            return false;
+        }
+        return asLong(metadata.get(DocumentKnowledgeMetadataKeys.KG_COMMUNITY_ID)) != null
+            || StrUtil.isNotBlank(safeText(metadata.get(DocumentKnowledgeMetadataKeys.KG_CROSS_DOCUMENT_COMMUNITY_KEY)))
+            || asLong(metadata.get(DocumentKnowledgeMetadataKeys.KG_EVIDENCE_ID)) != null;
+    }
+
+    private static boolean isGraphCommunitySummary(SearchReference reference) {
+        if (reference.isKgCommunitySummaryOnly()) {
+            return true;
+        }
+        return "GRAPH_RAG".equalsIgnoreCase(StrUtil.blankToDefault(reference.getSourceType(), ""))
+            && StrUtil.isBlank(reference.getQuoteText())
+            && (reference.getKgEvidenceId() != null || StrUtil.isNotBlank(reference.getKgCrossDocumentCommunityKey()));
+    }
+
+    private static boolean isRaptorParent(Map<String, Object> metadata) {
+        return "SOURCE_PARENT_BLOCK".equalsIgnoreCase(safeText(metadata.get(DocumentKnowledgeMetadataKeys.RAPTOR_SOURCE_STATUS)))
+            && asLong(metadata.get(DocumentKnowledgeMetadataKeys.PARENT_BLOCK_ID)) != null;
+    }
+
+    private static boolean isRaptorParent(SearchReference reference) {
+        return "SOURCE_PARENT_BLOCK".equalsIgnoreCase(StrUtil.blankToDefault(reference.getRaptorSourceStatus(), ""))
+            && reference.getParentBlockId() != null;
+    }
+
+    private static boolean isRaptorSummary(Map<String, Object> metadata) {
+        return "SUMMARY_ONLY".equalsIgnoreCase(safeText(metadata.get(DocumentKnowledgeMetadataKeys.RAPTOR_SOURCE_STATUS)))
+            && asLong(metadata.get(DocumentKnowledgeMetadataKeys.RAPTOR_NODE_ID)) != null;
+    }
+
+    private static boolean isRaptorSummary(SearchReference reference) {
+        return "SUMMARY_ONLY".equalsIgnoreCase(StrUtil.blankToDefault(reference.getRaptorSourceStatus(), ""))
+            && reference.getRaptorNodeId() != null;
+    }
+
+    private static boolean isParentEvidence(Map<String, Object> metadata) {
+        Long parentBlockId = asLong(metadata.get(DocumentKnowledgeMetadataKeys.PARENT_BLOCK_ID));
+        if (parentBlockId == null || isRawDocumentChunk(metadata) || isTableEvidence(metadata)) {
+            return false;
+        }
+        String chunkType = safeText(metadata.get(DocumentKnowledgeMetadataKeys.CHUNK_TYPE)).toUpperCase();
+        return asLong(metadata.get(DocumentKnowledgeMetadataKeys.CHUNK_ID)) == null
+            || chunkType.contains("PARENT")
+            || "PARENT_BLOCK".equalsIgnoreCase(safeText(metadata.get(DocumentKnowledgeMetadataKeys.CONTEXT_ARTIFACT)));
+    }
+
+    private static boolean isParentEvidence(SearchReference reference) {
+        if (reference.getParentBlockId() == null || isRawDocumentChunk(reference) || isTableEvidence(reference)) {
+            return false;
+        }
+        String chunkType = StrUtil.blankToDefault(reference.getChunkType(), "").trim().toUpperCase();
+        return reference.getChunkId() == null || chunkType.contains("PARENT");
+    }
+
+    private static boolean isWebReference(SearchReference reference) {
+        return reference != null && "WEB".equalsIgnoreCase(StrUtil.blankToDefault(reference.getSourceType(), "").trim());
+    }
+
+    private static String firstNonBlank(String... values) {
+        if (values == null) {
+            return "";
+        }
+        for (String value : values) {
+            if (StrUtil.isNotBlank(value)) {
+                return value.trim();
+            }
+        }
+        return "";
     }
 
     private static boolean isTableEvidence(Map<String, Object> metadata) {

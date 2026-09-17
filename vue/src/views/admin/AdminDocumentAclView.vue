@@ -1,6 +1,6 @@
 <template>
   <section class="flex flex-col gap-5">
-    <PageHeader title="文档授权" description="按文档分配访问权限：授权即刻生效，不需要重建索引。权限等级是单调的（可管理 ⇒ 可写 ⇒ 可读），因此勾选「可管理」同时意味着可写、可读。">
+    <PageHeader title="文档授权" description="按文档分配访问权限：授权即刻生效，不需要重建索引。权限是包含关系：可管理包含可写，可写包含可读。">
       <template #actions>
         <Button variant="outline" size="lg" class="rounded-md" type="button" :loading="refreshing" loading-text="刷新中" @click="loadDocuments({ silent: true })">
           <ArrowPathIcon v-if="!refreshing" data-icon="inline-start" aria-hidden="true" />
@@ -49,15 +49,24 @@
           <tr v-for="item in documents" :key="item.documentId" class="border-b border-border last:border-0 hover:bg-muted/60">
             <td class="px-4 py-3 align-top">
               <div class="flex flex-col gap-0.5">
-                <span class="font-medium text-foreground">{{ item.documentName || item.originalFileName || item.documentId }}</span>
-                <span class="text-caption text-muted-foreground">{{ item.documentId }}</span>
+                <span class="font-medium text-foreground">{{ item.documentName || item.originalFileName || '未命名文档' }}</span>
+                <span class="text-caption text-muted-foreground">{{ item.originalFileName || item.knowledgeBaseName || '未归属知识库' }}</span>
               </div>
             </td>
             <td class="px-4 py-3 align-top text-body-sm text-muted-foreground">{{ item.knowledgeBaseName || '未归属' }}</td>
             <td class="px-4 py-3 align-top"><StatusBadge :tone="resolveStatusTone('index', item.indexStatus)" :label="item.indexStatusName || '未知'" /></td>
             <td class="px-4 py-3 align-top">
               <div class="flex justify-end">
-                <Button variant="outline" size="sm" class="rounded-md" type="button" :disabled="actionLoading" @click="openAclDialog(item)">授权</Button>
+                <Button
+                  v-if="canManageDocumentAcl(item)"
+                  variant="outline"
+                  size="sm"
+                  class="rounded-md"
+                  type="button"
+                  :disabled="actionLoading"
+                  @click="openAclDialog(item)"
+                >授权</Button>
+                <span v-else class="text-caption text-muted-foreground">仅所有者或可管理权限可授权</span>
               </div>
             </td>
           </tr>
@@ -68,7 +77,7 @@
     <ChildPageDialog
       :open="dialogOpen"
       :title="`文档授权：${activeDocument?.documentName || ''}`"
-      description="授权立即生效，无需重建索引。权限等级单调：MANAGE ⇒ WRITE ⇒ READ。"
+      description="授权立即生效，无需重建索引。可管理包含可写，可写包含可读。"
       @update:open="dialogOpen = $event"
     >
       <div class="flex flex-col gap-5">
@@ -76,8 +85,8 @@
 
         <div v-if="activeAcl" class="flex flex-wrap items-center gap-2 text-body-sm text-muted-foreground">
           <span>你对该文档的有效权限：</span>
-          <StatusBadge :tone="activeAcl.callerPermission ? 'success' : 'waiting'" :label="activeAcl.callerPermission || '无'" />
-          <span class="text-caption">（没有 MANAGE 时本面板的授予与撤销都会被后端拒绝）</span>
+          <StatusBadge :tone="activeAcl.callerPermission ? 'success' : 'waiting'" :label="formatAclPermission(activeAcl.callerPermission) || '无'" />
+          <span class="text-caption">（没有「可管理」时，授予与撤销都会被后端拒绝）</span>
         </div>
 
         <AsyncState v-if="aclLoading" state="loading" title="正在加载授权" />
@@ -98,7 +107,7 @@
                   </span>
                 </span>
                 <span class="flex flex-wrap items-center gap-2">
-                  <StatusBadge :tone="entry.enabled ? 'success' : 'waiting'" :label="entry.enabled ? entry.permission : '已撤销'" />
+                  <StatusBadge :tone="entry.enabled ? 'success' : 'waiting'" :label="entry.enabled ? formatAclPermission(entry.permission) : '已撤销'" />
                   <Button
                     v-if="entry.enabled"
                     variant="outline"
@@ -167,9 +176,9 @@
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
-                    <SelectItem value="READ">可读（READ）</SelectItem>
-                    <SelectItem value="WRITE">可写（WRITE）</SelectItem>
-                    <SelectItem value="MANAGE">可管理（MANAGE）</SelectItem>
+                    <SelectItem value="READ">可读</SelectItem>
+                    <SelectItem value="WRITE">可写</SelectItem>
+                    <SelectItem value="MANAGE">可管理</SelectItem>
                   </SelectGroup>
                 </SelectContent>
               </Select>
@@ -203,6 +212,14 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { APIError, manageApi } from '../../api/api'
+import { denyPortfolioWrite } from '../../utils/demoAccounts'
+import { isFlagEnabled } from '../../utils/manageFormat'
+
+const ACL_PERMISSION_LABELS = Object.freeze({
+  READ: '可读',
+  WRITE: '可写',
+  MANAGE: '可管理'
+})
 
 const documents = ref([])
 const total = ref(0)
@@ -228,6 +245,14 @@ const principalOptions = computed(() => grantForm.value.principalType === 'ROLE'
 
 function errorMessage(error, fallback) {
   return error instanceof APIError && error.message ? error.message : fallback
+}
+
+function formatAclPermission(value) {
+  return ACL_PERMISSION_LABELS[value] || value || ''
+}
+
+function canManageDocumentAcl(item) {
+  return isFlagEnabled(item?.canManageAcl)
 }
 
 async function loadDocuments({ silent = false } = {}) {
@@ -310,6 +335,7 @@ async function openAclDialog(document) {
 }
 
 async function submitGrant() {
+  if (denyPortfolioWrite((message) => { notice.value = { type: 'danger', message } })) return
   if (!grantForm.value.principalId) {
     grantError.value = '请选择要授权的主体。'
     return
@@ -344,6 +370,7 @@ async function changePermission(entry) {
 }
 
 async function revokeEntry(entry) {
+  if (denyPortfolioWrite((message) => { notice.value = { type: 'danger', message } })) return
   actionLoading.value = true
   grantError.value = ''
   try {

@@ -15,6 +15,44 @@ export function hasCode(value, expected) {
   return normalizeCode(value) === String(expected)
 }
 
+const OPERATOR_ERROR_NOISE = /sentence-transformers|pip install|ModuleNotFoundError|Traceback \(most recent call last\)|File "\/|huggingface|Requirement already|torchvision/i
+
+/**
+ * 运营可见错误：去掉 pip / Python traceback / 工具链 JSON，只保留阶段结论。
+ */
+export function sanitizeOperatorError(message, fallback = '处理失败') {
+  const text = String(message || '').trim()
+  if (!text) {
+    return fallback
+  }
+  const looksLikeToolchainDump = OPERATOR_ERROR_NOISE.test(text)
+    || text.length > 280
+    || (text.includes('{') && /"detail"|"message"|traceback/i.test(text))
+  if (!looksLikeToolchainDump) {
+    return text
+  }
+  if (/RAPTOR/i.test(text)) {
+    return 'RAPTOR 构建失败，请打开文档详情查看阶段记录。'
+  }
+  if (/GraphRAG|图谱/i.test(text)) {
+    return '图谱构建失败，请打开文档详情查看阶段记录。'
+  }
+  if (/解析/i.test(text)) {
+    return '解析失败，请打开文档详情查看阶段记录。'
+  }
+  if (/索引|构建/i.test(text)) {
+    return '索引构建失败，请打开文档详情查看阶段记录。'
+  }
+  return `${fallback}，请打开文档详情查看阶段记录。`
+}
+
+/**
+ * 布尔/数字/字符串混用的开关（Jackson 可能写成 "true" / "1"）。
+ */
+export function isFlagEnabled(value) {
+  return value === true || value === 1 || value === 'true' || value === '1'
+}
+
 /**
  * 统一格式化日期时间字符串。
  */

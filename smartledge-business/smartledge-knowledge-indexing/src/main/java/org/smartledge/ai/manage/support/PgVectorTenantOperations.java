@@ -72,6 +72,7 @@ public class PgVectorTenantOperations {
         return transactionTemplate.execute(status -> {
             // 事务级设置：同一事务内的后续语句共享它，事务结束即失效。
             pgVectorJdbcTemplate.queryForObject(SET_TENANT_SQL, String.class, String.valueOf(resolvedTenant));
+            enableIterativeScanIfPresent();
             return action.get();
         });
     }
@@ -81,6 +82,19 @@ public class PgVectorTenantOperations {
      *
      * <p>包级可见便于同包测试直接锁定该契约（这是"不静默用默认租户"的唯一实现点）。</p>
      */
+    /** pgvector 0.8+：过滤后继续扫 HNSW，避免 over-fetch 假装成预过滤。 */
+    private void enableIterativeScanIfPresent() {
+        try {
+            pgVectorJdbcTemplate.queryForObject(
+                "SELECT set_config('hnsw.iterative_scan', 'relaxed_order', true)",
+                String.class
+            );
+        }
+        catch (RuntimeException ignored) {
+            log.debug("hnsw.iterative_scan 不可用，保持 over-fetch 兜底");
+        }
+    }
+
     static Long requireTenant(Long tenantId) {
         if (tenantId == null) {
             throw new IllegalStateException("向量库操作缺少租户：调用方必须显式给出租户，不能用默认租户兜底");

@@ -582,12 +582,16 @@ public class RagRetrievalEngine {
                                                 List<String> notes) {
         boolean requested = plan.isRerankRequested();
         if (window.buildFailed()) {
+            List<RetrievalDocument> fallback = window.includedDocuments();
+            markPolicyRerankStatus(fallback, requested ? RerankStatus.FAILED : RerankStatus.NOT_REQUESTED,
+                window.failureDetail());
             RerankExecution execution = requested
                 ? new RerankExecution(true, false, RerankExecutionStatus.FAILED_BEFORE_REQUEST,
                     RerankExecutionReason.WINDOW_BUILD_FAILED, RerankFailureStage.WINDOW_BUILD)
                 : new RerankExecution(false, false, RerankExecutionStatus.NOT_REQUESTED,
                     RerankExecutionReason.PLAN_DISABLED, RerankFailureStage.NONE);
-            return new RerankPipelineResult(List.of(), execution, List.of(), List.of());
+            notes.add("子问题" + subQuestionIndex + " Source 窗口构建失败，已降级保留融合前缀继续回答。");
+            return new RerankPipelineResult(fallback, execution, List.of(), List.of());
         }
 
         List<RetrievalDocument> candidates = window.includedDocuments();
@@ -623,10 +627,11 @@ public class RagRetrievalEngine {
             )
             : ragRerankService.rerank(subQuestion, candidates);
         if (transport.success()) {
-            markPolicyRerankStatus(candidates, RerankStatus.SUCCESS, "");
+            List<RetrievalDocument> ordered = orderByRerank(candidates);
+            markPolicyRerankStatus(ordered, RerankStatus.SUCCESS, "");
             markUsedChannel(usedChannels, RetrievalChannelEnum.RERANK.getName());
             return new RerankPipelineResult(
-                candidates,
+                ordered,
                 new RerankExecution(true, true, RerankExecutionStatus.SUCCESS,
                     RerankExecutionReason.NONE, RerankFailureStage.NONE),
                 transport.requestCandidates(),
@@ -661,6 +666,27 @@ public class RagRetrievalEngine {
             transport.requestCandidates(),
             transport.resultCandidates()
         );
+    }
+
+    private List<RetrievalDocument> orderByRerank(List<RetrievalDocument> candidates) {
+        if (candidates == null || candidates.isEmpty()) {
+            return List.of();
+        }
+        return candidates.stream()
+            .sorted((left, right) -> {
+                Integer leftRank = integerMetadataValue(left.getMetadata().get(DocumentKnowledgeMetadataKeys.RERANK_RANK));
+                Integer rightRank = integerMetadataValue(right.getMetadata().get(DocumentKnowledgeMetadataKeys.RERANK_RANK));
+                if (leftRank != null && rightRank != null && !leftRank.equals(rightRank)) {
+                    return Integer.compare(leftRank, rightRank);
+                }
+                Double leftScore = numericMetadataValue(left.getMetadata().get(DocumentKnowledgeMetadataKeys.RERANK_SCORE));
+                Double rightScore = numericMetadataValue(right.getMetadata().get(DocumentKnowledgeMetadataKeys.RERANK_SCORE));
+                return Double.compare(
+                    rightScore == null ? Double.NEGATIVE_INFINITY : rightScore,
+                    leftScore == null ? Double.NEGATIVE_INFINITY : leftScore
+                );
+            })
+            .toList();
     }
 
     private void markPolicyRerankStatus(List<RetrievalDocument> candidates, RerankStatus status, String error) {

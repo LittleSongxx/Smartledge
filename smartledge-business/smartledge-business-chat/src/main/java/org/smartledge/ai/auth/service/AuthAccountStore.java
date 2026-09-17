@@ -47,21 +47,47 @@ public interface AuthAccountStore {
     void recordSuccessfulLogin(Long tenantId, Long userId, Instant loginAt);
 
     /**
+     * 请求鉴权回查：包含停用账号，用于让已签发 token 在停用/撤权后失效。
+     */
+    Optional<SessionAccount> findSessionAccount(Long tenantId, Long userId);
+
+    /** 升高 token 版本，使该用户全部未过期 JWT 立即失效。 */
+    void incrementTokenVersion(Long tenantId, Long userId);
+
+    /**
      * 账号快照。
      *
      * @param failedAttempts 连续失败次数
      * @param lockedUntil    锁定截止时间；{@code null} 表示未锁定
+     * @param tokenVersion   当前令牌版本；停用、改角色、登出后递增
      */
     record AuthAccount(Long tenantId,
                        Long userId,
                        String username,
                        String passwordHash,
                        int failedAttempts,
-                       Instant lockedUntil) {
+                       Instant lockedUntil,
+                       long tokenVersion) {
+
+        public AuthAccount(Long tenantId,
+                           Long userId,
+                           String username,
+                           String passwordHash,
+                           int failedAttempts,
+                           Instant lockedUntil) {
+            this(tenantId, userId, username, passwordHash, failedAttempts, lockedUntil, 1L);
+        }
 
         /** 当前时刻是否处于锁定期。 */
         public boolean lockedAt(Instant now) {
             return lockedUntil != null && lockedUntil.isAfter(now);
         }
+    }
+
+    record SessionAccount(Long tenantId,
+                          Long userId,
+                          boolean userEnabled,
+                          boolean tenantEnabled,
+                          long tokenVersion) {
     }
 }

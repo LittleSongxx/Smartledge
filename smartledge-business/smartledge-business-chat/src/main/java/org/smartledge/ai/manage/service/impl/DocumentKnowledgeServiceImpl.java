@@ -108,6 +108,7 @@ public class DocumentKnowledgeServiceImpl implements DocumentKnowledgeService {
             1 - (embedding <=> CAST(? AS vector)) AS similarity_score
         FROM %s
         WHERE status = 1
+          AND (expires_at IS NULL OR expires_at > NOW())
           AND tenant_id = ?
           AND document_id IN (%s)
           AND task_id IN (%s)
@@ -137,6 +138,9 @@ public class DocumentKnowledgeServiceImpl implements DocumentKnowledgeService {
             .eq(SuperAgentDocument::getStatus, BusinessStatus.YES.getCode())
             .eq(SuperAgentDocument::getIndexStatus, DocumentIndexStatusEnum.BUILD_SUCCESS.getCode())
             .isNotNull(SuperAgentDocument::getLastIndexTaskId)
+            .and(wrapper -> wrapper.isNull(SuperAgentDocument::getExpiresAt)
+                .or()
+                .gt(SuperAgentDocument::getExpiresAt, java.time.LocalDateTime.now()))
             .orderByDesc(SuperAgentDocument::getEditTime)
             .orderByDesc(SuperAgentDocument::getId)));
     }
@@ -154,6 +158,9 @@ public class DocumentKnowledgeServiceImpl implements DocumentKnowledgeService {
             .eq(SuperAgentDocument::getIndexStatus, DocumentIndexStatusEnum.BUILD_SUCCESS.getCode())
             .isNotNull(SuperAgentDocument::getLastIndexTaskId)
             .in(SuperAgentDocument::getKnowledgeBaseId, ids)
+            .and(wrapper -> wrapper.isNull(SuperAgentDocument::getExpiresAt)
+                .or()
+                .gt(SuperAgentDocument::getExpiresAt, java.time.LocalDateTime.now()))
             .orderByDesc(SuperAgentDocument::getEditTime)
             .orderByDesc(SuperAgentDocument::getId)));
     }
@@ -193,7 +200,10 @@ public class DocumentKnowledgeServiceImpl implements DocumentKnowledgeService {
             return List.of();
         }
 
-        Long tenantId = TenantContext.get();
+        Long tenantId = org.smartledge.ai.manage.support.IndexTenantGuard.searchableTenantId();
+        if (tenantId == null) {
+            return List.of();
+        }
 
         StringBuilder sqlBuilder = new StringBuilder(VECTOR_RETRIEVE_SQL_TEMPLATE.formatted(
             DocumentPgVectorConstants.EMBEDDING_TABLE_NAME,
@@ -1086,6 +1096,11 @@ public class DocumentKnowledgeServiceImpl implements DocumentKnowledgeService {
                 .append(buildPlaceholders(filters.getItemIndexHints().size()))
                 .append(")");
         }
+        if (filters != null && filters.getUserMetadataEquals() != null && !filters.getUserMetadataEquals().isEmpty()) {
+            for (String field : filters.getUserMetadataEquals().keySet()) {
+                sqlBuilder.append("\n  AND ").append(org.smartledge.ai.manage.support.IndexRetrievalFilter.userMetadataSqlEquals(field));
+            }
+        }
     }
 
     private void appendStructureFilterParams(List<Object> params, DocumentRetrieveFilters filters) {
@@ -1102,6 +1117,11 @@ public class DocumentKnowledgeServiceImpl implements DocumentKnowledgeService {
         }
         if (CollUtil.isNotEmpty(filters.getItemIndexHints())) {
             params.addAll(filters.getItemIndexHints());
+        }
+        if (filters.getUserMetadataEquals() != null) {
+            params.addAll(filters.getUserMetadataEquals().values().stream()
+                .map(value -> value == null ? "" : String.valueOf(value))
+                .toList());
         }
     }
 

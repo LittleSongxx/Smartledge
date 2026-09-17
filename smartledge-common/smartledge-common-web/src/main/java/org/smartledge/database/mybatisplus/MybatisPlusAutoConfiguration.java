@@ -21,7 +21,7 @@ public class MybatisPlusAutoConfiguration {
     }
 
     @Bean
-    public MybatisPlusInterceptor mybatisPlusInterceptor(@Value("${app.tenant.enforcement-enabled:false}") boolean tenantEnforcementEnabled) {
+    public MybatisPlusInterceptor mybatisPlusInterceptor(@Value("${app.tenant.enforcement-enabled:true}") boolean tenantEnforcementEnabled) {
         MybatisPlusInterceptor interceptor = new MybatisPlusInterceptor();
         // 租户拦截器必须加在分页拦截器之前：MyBatis-Plus 要求多租户先重写 SQL，分页再基于重写后的语句执行。
         // 它在 SQL 重写层工作，因此同时覆盖 SELECT / INSERT / UPDATE / DELETE —— 已由 SQL 日志实证：

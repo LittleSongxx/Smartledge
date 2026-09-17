@@ -340,6 +340,7 @@
                           {{ channel.errorMessage ? '执行异常' : formatExecutionState(channel.executionState) }}
                         </span>
                         <p v-if="channel.retrievalIntent" class="m-0 mt-1 break-words text-micro text-muted-foreground">{{ channel.retrievalIntent }}</p>
+                        <p v-if="isEmptyAugmentationChannel(channel)" class="m-0 mt-1 text-micro text-muted-foreground">通道已执行但本轮召回为 0。若文档尚未构建图谱或 RAPTOR 树，这是预期现象。</p>
                       </div>
                       <div class="grid min-w-0 grid-cols-3 gap-3">
                         <div v-for="item in channelThroughputItems(channel)" :key="`${channel.key}-${item.key}`" class="min-w-0">
@@ -724,7 +725,7 @@ import { Button } from '@/components/ui/button'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import ChildPageDialog from '@/components/system/ChildPageDialog.vue'
-import { chatApi } from '../../api/api'
+import { manageApi } from '../../api/api'
 import {
   buildExchangeSignalMap, buildExchangeStages, buildTraceStageInspector, buildUsageStageInspector,
   buildExplicitCitationView, buildFusionCandidateFlow, buildFusionTraceGroups, buildRetrievalFlowSummary, buildTableEvidenceItems,
@@ -886,6 +887,11 @@ function fusionStatusClass(tone) {
   if (tone === 'warning') return 'bg-[var(--route-mode-shadow-bg)] text-[var(--route-mode-shadow-fg)]'
   return 'bg-[var(--status-waiting-bg)] text-[var(--status-waiting-fg)]'
 }
+function isEmptyAugmentationChannel(channel) {
+  const type = String(channel?.channelType || channel?.channelLabel || '').toUpperCase()
+  return Number(channel?.recalledCount || 0) === 0 && /GRAPH|RAPTOR|TABLE|图谱|表格/.test(type)
+}
+
 function channelThroughputItems(channel) {
   return [
     { key: 'recalled', label: '召回', value: channel.recalledCount, ratio: channel.recalledRatio },
@@ -970,7 +976,7 @@ async function loadStageBenchmarks() {
   loadingBenchmarks.value = true
   benchmarkError.value = ''
   try {
-    stageBenchmarks.value = await chatApi.getStageBenchmarks() || []
+    stageBenchmarks.value = await manageApi.getObservabilityStageBenchmarks() || []
   } catch (error) {
     stageBenchmarks.value = []
     benchmarkError.value = normalizeError(error, '阶段基准读取失败')
@@ -992,8 +998,8 @@ async function loadRetrievalObserveData() {
   loadingRetrievalData.value = true
   retrievalError.value = ''
   const [results, executions] = await Promise.allSettled([
-    chatApi.getRetrievalResults(conversationId.value, exchangeId.value),
-    chatApi.getChannelExecutions(conversationId.value, exchangeId.value)
+    manageApi.getObservabilityRetrievalResults(conversationId.value, exchangeId.value),
+    manageApi.getObservabilityChannelExecutions(conversationId.value, exchangeId.value)
   ])
   if (results.status === 'fulfilled') {
     retrievalResults.value = Array.isArray(results.value) ? results.value : []
@@ -1011,7 +1017,7 @@ async function loadPage() {
   if (!conversationId.value || !exchangeId.value) return
   loadingPage.value = true; pageError.value = ''
   try {
-    const [session, exchangeDetail] = await Promise.all([chatApi.getSession(conversationId.value), chatApi.getExchangeDetail(conversationId.value, exchangeId.value)])
+    const [session, exchangeDetail] = await Promise.all([manageApi.getObservabilitySession(conversationId.value), manageApi.getObservabilityExchangeDetail(conversationId.value, exchangeId.value)])
     activeSession.value = session; activeExchangeDetail.value = exchangeDetail
     loadRetrievalObserveData(); loadStageBenchmarks()
   } catch (error) { activeSession.value = null; activeExchangeDetail.value = null; pageError.value = normalizeError(error, '加载轮次详情失败') }

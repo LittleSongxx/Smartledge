@@ -59,6 +59,10 @@ public class DocumentElasticsearchIndexInitializer {
             .index(indexName)
             .mappings(mapping -> mapping
                 .properties("chunkId", property -> property.keyword(keyword -> keyword))
+                .properties("tenantId", property -> property.long_(number -> number))
+                .properties("status", property -> property.integer(number -> number))
+                .properties("expiresAt", property -> property.date(date -> date))
+                .properties("userMetadata", property -> property.object(object -> object.enabled(true)))
                 .properties("documentId", property -> property.long_(number -> number))
                 .properties("taskId", property -> property.long_(number -> number))
                 .properties("parentBlockId", property -> property.long_(number -> number))

@@ -13,6 +13,7 @@ import org.smartledge.ai.auth.mapper.AuthRolePermissionMapper;
 import org.smartledge.ai.auth.mapper.AuthUserAccountMapper;
 import org.smartledge.ai.auth.mapper.AuthUserRoleMapper;
 import org.smartledge.ai.auth.support.AuthFailureException;
+import org.smartledge.ai.auth.service.AuthAccountStore;
 import org.smartledge.ai.auth.support.PasswordVerifier;
 import org.smartledge.ai.manage.support.MybatisLambdaCacheTestSupport;
 import org.smartledge.database.tenant.RequestIdentity;
@@ -57,6 +58,8 @@ class TenantMemberManageServiceImplTest {
 
     private static final Long MEMBER_USER_ID = 42L;
 
+    private static final Long ADMIN_ROLE_ID = 1L;
+
     private static final Long CURATOR_ROLE_ID = 2L;
 
     private static final Long FOREIGN_ROLE_ID = 900L;
@@ -81,6 +84,9 @@ class TenantMemberManageServiceImplTest {
 
     @Mock
     private UidGenerator uidGenerator;
+
+    @Mock
+    private AuthAccountStore authAccountStore;
 
     @InjectMocks
     private TenantMemberManageServiceImpl service;
@@ -123,6 +129,16 @@ class TenantMemberManageServiceImplTest {
         return role;
     }
 
+    private AuthRole adminRole() {
+        AuthRole role = new AuthRole();
+        role.setId(ADMIN_ROLE_ID);
+        role.setTenantId(TENANT_ID);
+        role.setRoleCode("ADMIN");
+        role.setRoleName("租户管理员");
+        role.setStatus(1);
+        return role;
+    }
+
     @Test
     @DisplayName("没有认证主体时拒绝（fail closed）")
     void rejectsWithoutIdentity() {
@@ -140,7 +156,7 @@ class TenantMemberManageServiceImplTest {
         when(uidGenerator.getUid()).thenReturn(1001L, 2001L);
         when(passwordVerifier.encode("user123456")).thenReturn("$2a$10$encoded");
         when(userAccountMapper.selectOne(any())).thenReturn(null);
-        when(roleMapper.selectList(any())).thenReturn(List.of(curatorRole()));
+        when(roleMapper.selectList(any())).thenReturn(List.of(adminRole(), curatorRole()));
         when(userRoleMapper.selectList(any())).thenReturn(List.of());
 
         TenantMemberSaveDto dto = new TenantMemberSaveDto();
@@ -260,6 +276,49 @@ class TenantMemberManageServiceImplTest {
         service.updateStatus(dto);
 
         verify(userAccountMapper).update(any(), any(Wrapper.class));
+        verify(authAccountStore).incrementTokenVersion(TENANT_ID, MEMBER_USER_ID);
+    }
+
+    @Test
+    @DisplayName("不能停用租户内最后一名启用 ADMIN")
+    void refusesToDisableLastEnabledAdmin() {
+        signInAs(ADMIN_USER_ID, "admin");
+        when(userAccountMapper.selectOne(any())).thenReturn(member(MEMBER_USER_ID, "other-admin", 1));
+        AuthUserRole relation = new AuthUserRole();
+        relation.setUserId(MEMBER_USER_ID);
+        relation.setRoleId(ADMIN_ROLE_ID);
+        relation.setStatus(1);
+        when(userRoleMapper.selectList(any())).thenReturn(List.of(relation));
+        when(roleMapper.selectList(any())).thenReturn(List.of(adminRole()));
+        when(userAccountMapper.selectCount(any())).thenReturn(1L);
+
+        TenantMemberStatusUpdateDto dto = new TenantMemberStatusUpdateDto();
+        dto.setId(String.valueOf(MEMBER_USER_ID));
+        dto.setStatus("0");
+
+        assertThatThrownBy(() -> service.updateStatus(dto))
+            .isInstanceOf(SuperAgentFrameException.class)
+            .hasMessageContaining("最后一名启用管理员");
+        verify(userAccountMapper, never()).update(any(), any(Wrapper.class));
+    }
+
+    @Test
+    @DisplayName("CURATOR 不能把别人提成 ADMIN")
+    void curatorCannotGrantAdmin() {
+        TenantContext.setIdentity(new RequestIdentity(
+            TENANT_ID, MEMBER_USER_ID, "curator", Set.of(CURATOR_ROLE_ID), Set.of("user:manage")));
+        when(roleMapper.selectList(any())).thenReturn(List.of(adminRole(), curatorRole()));
+
+        TenantMemberSaveDto dto = new TenantMemberSaveDto();
+        dto.setUsername("new-admin");
+        dto.setDisplayName("越权提升");
+        dto.setPassword("user123456");
+        dto.setRoleIds(List.of(String.valueOf(ADMIN_ROLE_ID)));
+
+        assertThatThrownBy(() -> service.save(dto))
+            .isInstanceOf(SuperAgentFrameException.class)
+            .hasMessageContaining("高于自己的角色");
+        verify(userAccountMapper, never()).insert(any(AuthUserAccount.class));
     }
 
     @Test

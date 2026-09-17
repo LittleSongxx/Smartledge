@@ -24,6 +24,8 @@ public class SuperAgentDocumentParseArtifact extends BaseTableData {
     @TableId(value = "id", type = IdType.INPUT)
     private Long id;
 
+    private Long tenantId;
+
     private Long documentId;
 
     private Long taskId;

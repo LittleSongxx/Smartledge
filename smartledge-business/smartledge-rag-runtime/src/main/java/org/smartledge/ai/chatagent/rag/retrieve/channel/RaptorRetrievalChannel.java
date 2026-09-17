@@ -128,7 +128,7 @@ public class RaptorRetrievalChannel implements RetrievalChannel {
         }
         String sourceStatus = resolveSourceStatus(result);
         if (SOURCE_STATUS_SUMMARY_ONLY.equals(sourceStatus)) {
-            builder.append("下钻状态：未找到可引用 source chunk 或 ParentBlock，本证据仅作为摘要背景。\n");
+            builder.append("种类：综述。未下钻到 source chunk 或 ParentBlock，按 SUMMARY 引用，不要写成原文摘录。\n");
         }
         else if (SOURCE_STATUS_SOURCE_PARENT_BLOCK.equals(sourceStatus) && StrUtil.isBlank(result.getChunkText())) {
             builder.append("下钻状态：已定位到 ParentBlock，但当前结果未携带 chunk 原文。\n");

@@ -4,6 +4,7 @@ import org.smartledge.ai.auth.support.AuthenticatedPrincipal;
 import org.smartledge.ai.auth.support.JwtAuthenticationFilter;
 import org.smartledge.ai.auth.support.JwtTokenService;
 import org.smartledge.ai.auth.support.ManagePermissionInterceptor;
+import org.smartledge.ai.auth.support.PortfolioDemoInterceptor;
 import org.smartledge.ai.auth.support.PreviewModeInterceptor;
 import org.smartledge.ai.auth.support.RequiresPermission;
 import org.smartledge.ai.auth.support.RestAccessDeniedHandler;
@@ -18,6 +19,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.security.web.FilterChainProxy;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import jakarta.servlet.DispatcherType;
@@ -73,11 +75,15 @@ class SecurityFilterChainRulesTest {
     @MockitoBean
     private PreviewModeInterceptor previewModeInterceptor;
 
+    @MockitoBean
+    private PortfolioDemoInterceptor portfolioDemoInterceptor;
+
     private MockMvc mockMvc;
 
     private MockMvc mockMvc() throws Exception {
         if (mockMvc == null) {
             lenient().when(previewModeInterceptor.preHandle(any(), any(), any())).thenReturn(true);
+            lenient().when(portfolioDemoInterceptor.preHandle(any(), any(), any())).thenReturn(true);
             mockMvc = MockMvcBuilders.webAppContextSetup(context)
                 .addFilters(springSecurityFilterChain)
                 .build();
@@ -86,8 +92,8 @@ class SecurityFilterChainRulesTest {
     }
 
     @Test
-    @DisplayName("对话接口无 token 时 401，有用户端 token 时放行")
-    void chatRequiresAnyAuthenticatedIdentity() throws Exception {
+    @DisplayName("对话接口无 token 时 401，必须持 chat:use")
+    void chatRequiresChatUse() throws Exception {
         mockMvc().perform(post("/api/chat/probe"))
             .andExpect(status().isUnauthorized());
 
@@ -95,8 +101,26 @@ class SecurityFilterChainRulesTest {
             .andExpect(status().isOk())
             .andExpect(content().string(org.hamcrest.Matchers.containsString("chat-ok")));
 
-        // 管理员本身也是租户内的用户，管理端 token 同样可以对话（用户端不因用途而收窄）。
-        mockMvc().perform(post("/api/chat/probe").header("Authorization", bearer(principal(TokenAudience.ADMIN, Set.of(OBSERVE_PERMISSION)))))
+        mockMvc().perform(post("/api/chat/probe").header("Authorization",
+                bearer(principal(TokenAudience.ADMIN, Set.of(OBSERVE_PERMISSION)))))
+            .andExpect(status().isForbidden());
+
+        mockMvc().perform(post("/api/chat/probe").header("Authorization",
+                bearer(principal(TokenAudience.ADMIN, Set.of("chat:use", OBSERVE_PERMISSION)))))
+            .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("/api/auth/me 接受已认证的用户端或管理端 token")
+    void authMeAcceptsAuthenticatedAudience() throws Exception {
+        mockMvc().perform(post("/api/auth/me"))
+            .andExpect(status().isUnauthorized());
+        mockMvc().perform(post("/api/auth/me").header("Authorization",
+                bearer(principal(TokenAudience.CHAT, Set.of("chat:use")))))
+            .andExpect(status().isOk())
+            .andExpect(content().string(org.hamcrest.Matchers.containsString("me-ok")));
+        mockMvc().perform(post("/api/auth/me").header("Authorization",
+                bearer(principal(TokenAudience.ADMIN, Set.of("console:access")))))
             .andExpect(status().isOk());
     }
 
@@ -182,6 +206,14 @@ class SecurityFilterChainRulesTest {
             .andExpect(status().isUnauthorized());
     }
 
+    @Test
+    @DisplayName("没有 Bearer 前缀的 JWT 不建立认证")
+    void rawJwtWithoutBearerIsIgnored() throws Exception {
+        String raw = jwtTokenService.generateToken(principal(TokenAudience.CHAT, Set.of("chat:use")));
+        mockMvc().perform(post("/api/chat/probe").header("Authorization", raw))
+            .andExpect(status().isUnauthorized());
+    }
+
     private String bearer(AuthenticatedPrincipal principal) {
         return "Bearer " + jwtTokenService.generateToken(principal);
     }
@@ -195,6 +227,7 @@ class SecurityFilterChainRulesTest {
     static class TokenSupport {
 
         @Bean
+        @Primary
         AdminAuthProperties adminAuthProperties() {
             AdminAuthProperties properties = new AdminAuthProperties();
             properties.setTokenSecret("filter-chain-test-secret");
@@ -203,6 +236,7 @@ class SecurityFilterChainRulesTest {
         }
 
         @Bean
+        @Primary
         JwtTokenService jwtTokenService(AdminAuthProperties adminAuthProperties) {
             return new JwtTokenService(adminAuthProperties);
         }

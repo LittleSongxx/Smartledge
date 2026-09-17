@@ -4,9 +4,9 @@ import router from './index'
 const TOKEN_KEY = 'smartledge-admin-token'
 const CHAT_TOKEN_KEY = 'smartledge-chat-token'
 
-function validToken() {
+function validToken(perms = ['document:read', 'observe:read', 'kb:read', 'console:access']) {
   const header = window.btoa(JSON.stringify({ alg: 'none', typ: 'JWT' }))
-  const payload = window.btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 }))
+  const payload = window.btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600, perms }))
   return `${header}.${payload}.signature`
 }
 
@@ -57,5 +57,24 @@ describe('B4 user route guard', () => {
     window.localStorage.setItem(CHAT_TOKEN_KEY, validToken())
     await router.push('/admin/documents')
     expect(router.currentRoute.value.name).toBe('AdminLogin')
+  })
+})
+
+describe('admin route permission guard', () => {
+  beforeEach(async () => {
+    window.localStorage.clear()
+    await router.replace('/chat')
+  })
+
+  it('blocks a deep link the current identity cannot use', async () => {
+    window.localStorage.setItem(TOKEN_KEY, validToken(['console:access', 'document:read', 'kb:read', 'observe:read']))
+    await router.push('/admin/members')
+    expect(router.currentRoute.value.name).toBe('AdminForbidden')
+  })
+
+  it('allows a page the current identity can use', async () => {
+    window.localStorage.setItem(TOKEN_KEY, validToken(['console:access', 'document:read']))
+    await router.push('/admin/documents')
+    expect(router.currentRoute.value.name).toBe('AdminDocuments')
   })
 })

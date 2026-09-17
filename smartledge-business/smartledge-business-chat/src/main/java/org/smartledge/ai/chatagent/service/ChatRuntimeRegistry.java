@@ -7,31 +7,30 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 /**
- * @description: 服务层
- * @author: Song
- **/
+ * 进行中对话任务表。键必须带租户，禁止裸 conversationId 跨租户互踩。
+ */
 @Component
 public class ChatRuntimeRegistry {
 
     private final ConcurrentMap<String, TaskInfo> taskMap = new ConcurrentHashMap<>();
 
     public boolean register(TaskInfo taskInfo) {
-        return taskMap.putIfAbsent(taskInfo.conversationId(), taskInfo) == null;
+        return taskMap.putIfAbsent(ConversationRuntimeKeys.registryKey(taskInfo.tenantId(), taskInfo.conversationId()),
+            taskInfo) == null;
     }
 
-    public Optional<TaskInfo> get(String conversationId) {
-        return Optional.ofNullable(taskMap.get(conversationId));
+    public Optional<TaskInfo> get(Long tenantId, String conversationId) {
+        return Optional.ofNullable(taskMap.get(ConversationRuntimeKeys.registryKey(tenantId, conversationId)));
     }
 
-    public void remove(String conversationId) {
-
-        taskMap.remove(conversationId);
+    public void remove(Long tenantId, String conversationId) {
+        taskMap.remove(ConversationRuntimeKeys.registryKey(tenantId, conversationId));
     }
 
-    public void remove(String conversationId, TaskInfo expectedTaskInfo) {
-        if (conversationId == null || expectedTaskInfo == null) {
+    public void remove(Long tenantId, String conversationId, TaskInfo expectedTaskInfo) {
+        if (tenantId == null || conversationId == null || expectedTaskInfo == null) {
             return;
         }
-        taskMap.remove(conversationId, expectedTaskInfo);
+        taskMap.remove(ConversationRuntimeKeys.registryKey(tenantId, conversationId), expectedTaskInfo);
     }
 }

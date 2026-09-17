@@ -212,6 +212,20 @@ class MarkdownDocumentParserTest(unittest.TestCase):
         self.assertTrue(all(node.origin == "PROVIDER_MARKDOWN" for node in syntax.nodes))
         self.assertEqual(["TITLE", "LIST"], [block.block_type for block in blocks])
 
+    def test_empty_layout_blocks_are_dropped_with_warning(self) -> None:
+        parser = document_parser.AliyunDocMindParser()
+        blocks, syntax, warnings = parser._result_to_blocks({
+            "Data": {
+                "layouts": [
+                    {"type": "text", "text": ""},
+                    {"type": "text", "text": "可见段落"},
+                ],
+            }
+        })
+        self.assertIsNone(syntax)
+        self.assertEqual(["TEXT"], [block.block_type for block in blocks])
+        self.assertTrue(any("空 layout" in item for item in warnings))
+
     def _parse(self, source: str):
         return parse_document(DocumentParseRequest(
             fileName="通用操作说明.md",

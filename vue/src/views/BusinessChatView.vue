@@ -20,8 +20,9 @@ import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { APIError, chatApi, chatAuthApi, createConversationId } from '../api/api'
+import { APIError, chatApi, chatAuthApi } from '../api/api'
 import { clearChatAuth, hasChatPermission } from '../utils/chatAuth'
+import { PORTFOLIO_DEMO_PERMISSION } from '../utils/demoAccounts'
 import { buildChatRouteExplain, buildRouteTraceLookup } from '../utils/knowledgeRoute'
 import {
   isNearScrollBottom,
@@ -29,8 +30,12 @@ import {
   shouldApplyStreamEvent,
   shouldSubmitComposerEvent
 } from '@/features/chat/chatBehavior'
+import { createLatestRequestGuard } from '@/features/admin/adminBehavior'
+import { useConfirm } from '@/composables/useConfirm'
 
 const router = useRouter()
+const { confirm } = useConfirm()
+const conversationRequestGuard = createLatestRequestGuard()
 const composerShellRef = ref(null)
 const messagesPanelRef = ref(null)
 const mobileHistoryTriggerRef = ref(null)
@@ -60,7 +65,8 @@ const CHAT_MODES = Object.freeze({ DOCUMENT: 'DOCUMENT', AUTO_DOCUMENT: 'AUTO_DO
 /** 管理端准入能力（与后端 `UserAuthServiceImpl.CONSOLE_PERMISSION` 同名）。 */
 const ADMIN_CONSOLE_PERMISSION = 'console:access'
 const KB_SELECTION_MODES = Object.freeze({ NONE: 'NONE', SELECTED: 'SELECTED' })
-const chatMode = ref(CHAT_MODES.OPEN_CHAT)
+const settingsOpen = ref(false)
+const chatMode = ref(CHAT_MODES.AUTO_DOCUMENT)
 const knowledgeBaseSelectionMode = ref(KB_SELECTION_MODES.NONE)
 const selectedKnowledgeBaseIds = ref([])
 let streamSequence = 0
@@ -77,14 +83,30 @@ const filteredDocumentOptions = computed(() => {
 const canSend = computed(() => {
   if (isInteractionLocked.value) return false
   if (!userInput.value.trim()) return false
-  if (!isDocumentMode.value) return true
-  return hasSelectedKnowledgeBases.value && Boolean(selectedDocumentId.value)
+  if (isDocumentMode.value) return hasSelectedKnowledgeBases.value && Boolean(selectedDocumentId.value)
+  if (isAutoDocumentMode.value) return hasSelectedKnowledgeBases.value
+  return true
+})
+const canUsePromptChip = computed(() => {
+  if (isInteractionLocked.value) return false
+  if (isDocumentMode.value) return hasSelectedKnowledgeBases.value && Boolean(selectedDocumentId.value)
+  if (isAutoDocumentMode.value) return hasSelectedKnowledgeBases.value
+  return true
 })
 const composerPlaceholder = computed(() => {
+  if (isAutoDocumentMode.value && !hasSelectedKnowledgeBases.value) {
+    return knowledgeBaseOptions.value.length ? '请先勾选至少一个知识库。' : '请联系知识库管理员授权后再提问。'
+  }
   if (isAutoDocumentMode.value && hasSelectedKnowledgeBases.value) return '输入问题，系统会从已选知识库中定位相关文档。'
   return isDocumentMode.value
     ? '输入关于当前文档的问题。'
     : '输入你想继续讨论的问题。'
+})
+const knowledgeAccessHint = computed(() => {
+  if (loadingKnowledgeBaseOptions.value) return '正在加载可检索的知识库。'
+  if (!knowledgeBaseOptions.value.length) return '当前账号还没有可检索的知识库，请联系知识库管理员授权。'
+  if (isAutoDocumentMode.value && !hasSelectedKnowledgeBases.value) return '请先勾选至少一个知识库，再开始自动知识问答。'
+  return '可以直接提问，也可以先在输入区设置知识库和回答范围。'
 })
 const sortedSessions = computed(() => [...sessions.value].sort((left, right) => {
   const leftTime = left?.updatedAt ? new Date(left.updatedAt).getTime() : 0
@@ -93,7 +115,12 @@ const sortedSessions = computed(() => [...sessions.value].sort((left, right) => 
 }))
 const activeSessionTitle = computed(() => {
   const session = sessions.value.find((item) => item.conversationId === currentConversationId.value)
-  return session ? sessionTitle(session) : '新的对话'
+  if (session) {
+    const titled = sessionTitle(session)
+    if (titled !== '新的对话') return titled
+  }
+  const firstUser = displayMessages.value.find((item) => item.role === 'user' && String(item.content || '').trim())
+  return firstUser ? firstUser.content.trim() : '新的对话'
 })
 const latestAssistantDisplayId = computed(() => {
   const message = [...displayMessages.value].reverse().find((item) => item.role === 'assistant')
@@ -107,13 +134,17 @@ const adminConsoleHref = computed(() => router.resolve({
   name: 'AdminLogin',
   query: { redirect: '/admin/dashboard' }
 }).href)
-const chatModeButtons = computed(() => [
-  { value: CHAT_MODES.DOCUMENT, label: '当前文档' },
-  { value: CHAT_MODES.AUTO_DOCUMENT, label: '自动知识' },
-  { value: CHAT_MODES.OPEN_CHAT, label: '开放提问' }
-])
+const isPortfolioDemo = computed(() => hasChatPermission(PORTFOLIO_DEMO_PERMISSION))
+const chatModeButtons = computed(() => {
+  const buttons = [
+    { value: CHAT_MODES.DOCUMENT, label: '当前文档' },
+    { value: CHAT_MODES.AUTO_DOCUMENT, label: '自动知识' },
+    { value: CHAT_MODES.OPEN_CHAT, label: '开放提问' }
+  ]
+  return isPortfolioDemo.value ? buttons.filter((item) => item.value !== CHAT_MODES.OPEN_CHAT) : buttons
+})
 const documentScopePlaceholder = computed(() => {
-  if (loadingDocumentOptions) {
+  if (loadingDocumentOptions.value) {
     return '正在加载可查看的文档'
   }
   return filteredDocumentOptions.value.length ? '请选择一个文档' : '没有可查看的文档'
@@ -217,6 +248,18 @@ function upsertSession(session) {
   sessions.value = next
 }
 
+function rememberConversationTitle(conversationId, question) {
+  const title = String(question || '').trim()
+  if (!conversationId || !title) return
+  const existing = sessions.value.find((item) => item.conversationId === conversationId)
+  upsertSession({
+    ...(existing || {}),
+    conversationId,
+    latestUserMessage: title,
+    updatedAt: existing?.updatedAt || new Date().toISOString()
+  })
+}
+
 function updateAssistantMessage(messageId, updater) {
   const index = displayMessages.value.findIndex((message) => message.id === messageId)
   if (index === -1) return
@@ -296,6 +339,7 @@ async function refreshKnowledgeBaseOptions() {
   try {
     const data = await chatApi.listKnowledgeBaseOptions()
     knowledgeBaseOptions.value = Array.isArray(data) ? data : []
+    applyDefaultKnowledgeScope()
   } catch (error) {
     pageError.value = normalizeError(error, '加载知识库选项失败')
   } finally {
@@ -303,8 +347,18 @@ async function refreshKnowledgeBaseOptions() {
   }
 }
 
+function applyDefaultKnowledgeScope() {
+  if (currentConversationId.value || displayMessages.value.length) return
+  if (hasSelectedKnowledgeBases.value) return
+  if (!knowledgeBaseOptions.value.length) return
+  selectedKnowledgeBaseIds.value = knowledgeBaseOptions.value.map((item) => String(item.id)).filter(Boolean)
+  knowledgeBaseSelectionMode.value = KB_SELECTION_MODES.SELECTED
+  if (chatMode.value === CHAT_MODES.OPEN_CHAT) chatMode.value = CHAT_MODES.AUTO_DOCUMENT
+}
+
 async function loadConversation(conversationId) {
   if (!conversationId || isInteractionLocked.value) return
+  const requestId = conversationRequestGuard.begin()
   let conversationLoaded = false
   currentConversationId.value = conversationId
   mobileHistoryOpen.value = false
@@ -316,6 +370,7 @@ async function loadConversation(conversationId) {
       chatApi.getSession(conversationId),
       chatApi.queryKnowledgeRouteTrace({ conversationId })
     ])
+    if (!conversationRequestGuard.isCurrent(requestId)) return
     if (sessionResult.status !== 'fulfilled') throw sessionResult.reason
     // 路由说明是回答的附加解释，取不到不影响会话本身；但不再像以前那样"非管理员静默降级"。
     if (routeTraceResult.status === 'rejected') console.warn('加载知识路由说明失败', routeTraceResult.reason)
@@ -329,9 +384,10 @@ async function loadConversation(conversationId) {
     mobileHistoryOpen.value = false
     conversationLoaded = true
   } catch (error) {
+    if (!conversationRequestGuard.isCurrent(requestId)) return
     pageError.value = normalizeError(error, '加载会话详情失败')
   } finally {
-    loadingConversation.value = false
+    if (conversationRequestGuard.isCurrent(requestId)) loadingConversation.value = false
   }
   if (conversationLoaded) await scrollToBottom({ force: true })
 }
@@ -343,6 +399,8 @@ function logout() {
 
 async function deleteConversation(conversationId) {
   if (!conversationId || isInteractionLocked.value) return
+  const confirmed = await confirm('删除后无法恢复该会话及其问答记录。', '删除会话')
+  if (!confirmed) return
   try {
     await chatApi.deleteSession(conversationId)
     sessions.value = sessions.value.filter((item) => item.conversationId !== conversationId)
@@ -356,20 +414,26 @@ async function deleteConversation(conversationId) {
   }
 }
 
-function startNewConversation() {
-  if (isInteractionLocked.value) return
-  currentConversationId.value = createConversationId()
+function resetConversationKeepingScope() {
+  currentConversationId.value = ''
   displayMessages.value = []
   userInput.value = ''
   pageError.value = ''
   mobileHistoryOpen.value = false
   isFollowingOutput.value = true
-  syncSelectedDocumentName()
   focusComposer()
 }
 
+function startNewConversation() {
+  if (isInteractionLocked.value) return
+  resetConversationKeepingScope()
+  chatMode.value = CHAT_MODES.AUTO_DOCUMENT
+  applyDefaultKnowledgeScope()
+  syncSelectedDocumentName()
+}
+
 function applySessionScope(session) {
-  chatMode.value = session?.chatMode || CHAT_MODES.OPEN_CHAT
+  chatMode.value = session?.chatMode || CHAT_MODES.AUTO_DOCUMENT
   selectedDocumentId.value = session?.selectedDocumentId || ''
   selectedDocumentName.value = session?.selectedDocumentName || ''
   selectedKnowledgeBaseIds.value = Array.isArray(session?.selectedKnowledgeBaseIds)
@@ -397,7 +461,9 @@ function syncSelectedDocumentName() {
 
 function handleDocumentScopeChange() {
   syncSelectedDocumentName()
-  if (isDocumentMode.value && displayMessages.value.length > 0 && !isStreaming.value) startNewConversation()
+  if (isDocumentMode.value && displayMessages.value.length > 0 && !isStreaming.value) {
+    resetConversationKeepingScope()
+  }
 }
 
 function normalizeKnowledgeBaseSelectionMode(value) {
@@ -436,7 +502,6 @@ function handleSelectedKnowledgeBasesChange() {
   selectedKnowledgeBaseIds.value = [...new Set(selectedKnowledgeBaseIds.value.map((item) => String(item)).filter(Boolean))]
   syncKnowledgeBaseSelectionMode()
   if (knowledgeBaseSelectionMode.value === KB_SELECTION_MODES.NONE) {
-    chatMode.value = CHAT_MODES.OPEN_CHAT
     selectedDocumentId.value = ''
     selectedDocumentName.value = ''
   } else if (chatMode.value === CHAT_MODES.OPEN_CHAT) {
@@ -447,9 +512,16 @@ function handleSelectedKnowledgeBasesChange() {
 
 function setChatMode(nextMode) {
   if (isInteractionLocked.value || chatMode.value === nextMode) return
-  if (nextMode !== CHAT_MODES.OPEN_CHAT && !hasSelectedKnowledgeBases.value) {
-    pageError.value = '请先选择至少一个知识库，再切换知识回答模式。'
-    return
+  if (nextMode === CHAT_MODES.OPEN_CHAT && isPortfolioDemo.value) return
+  if (nextMode !== CHAT_MODES.OPEN_CHAT) {
+    if (!knowledgeBaseOptions.value.length) {
+      pageError.value = '当前没有可检索的知识库，请联系知识库管理员授权。'
+      return
+    }
+    if (!hasSelectedKnowledgeBases.value) {
+      pageError.value = '请先选择至少一个知识库，再切换知识回答模式。'
+      return
+    }
   }
   chatMode.value = nextMode
   pageError.value = ''
@@ -464,6 +536,11 @@ function handleComposerKeydown(event) {
 
 function applyStreamEvent(event, streamToken) {
   if (!shouldApplyStreamEvent(activeStreamToken.value, streamToken)) return
+  if (event?.conversationId) {
+    currentConversationId.value = String(event.conversationId)
+    const firstUser = displayMessages.value.find((item) => item.role === 'user' && String(item.content || '').trim())
+    rememberConversationTitle(currentConversationId.value, firstUser?.content)
+  }
   const messageId = currentAssistantMessageId.value
   updateAssistantMessage(messageId, (message) => mergeAssistantStreamEvent(message, event))
   scrollToBottom()
@@ -479,12 +556,13 @@ async function sendMessage(presetQuestion) {
     return
   }
 
-  const conversationId = currentConversationId.value || createConversationId()
+  const conversationId = currentConversationId.value || ''
   const assistantMessage = createAssistantMessage(question)
   const streamToken = `stream-${++streamSequence}`
   currentConversationId.value = conversationId
   pageError.value = ''
   displayMessages.value = [...displayMessages.value, createUserMessage(question), assistantMessage]
+  rememberConversationTitle(conversationId, question)
   currentAssistantMessageId.value = assistantMessage.id
   activeStreamToken.value = streamToken
   isStreaming.value = true
@@ -528,8 +606,9 @@ async function sendMessage(presetQuestion) {
     if (completedNormally) {
       isStopping.value = false
       await refreshSessions()
-      const sessionExists = sessions.value.some((item) => item.conversationId === conversationId)
-      if (sessionExists) await loadConversation(conversationId)
+      const issuedConversationId = currentConversationId.value || conversationId
+      const sessionExists = sessions.value.some((item) => item.conversationId === issuedConversationId)
+      if (sessionExists) await loadConversation(issuedConversationId)
     }
   }
 }
@@ -544,13 +623,17 @@ function buildKnowledgeBasePayload() {
   return { knowledgeBaseSelectionMode: KB_SELECTION_MODES.NONE, selectedKnowledgeBaseIds: [] }
 }
 
-function resolvePayloadChatMode(selectionMode) {
-  if (selectionMode === KB_SELECTION_MODES.NONE) return CHAT_MODES.OPEN_CHAT
+function resolvePayloadChatMode(_selectionMode) {
+  if (chatMode.value === CHAT_MODES.OPEN_CHAT) return CHAT_MODES.OPEN_CHAT
   return isDocumentMode.value ? CHAT_MODES.DOCUMENT : CHAT_MODES.AUTO_DOCUMENT
 }
 
+function onSettingsToggle(event) {
+  settingsOpen.value = Boolean(event?.target?.open)
+}
+
 async function stopStreaming() {
-  if (!isStreaming.value || !currentConversationId.value || !currentStreamHandle.value) return
+  if (!isStreaming.value || !currentStreamHandle.value) return
   const conversationId = currentConversationId.value
   const assistantMessageId = currentAssistantMessageId.value
   const streamHandle = currentStreamHandle.value
@@ -558,6 +641,15 @@ async function stopStreaming() {
   isStopping.value = true
   updateAssistantMessage(assistantMessageId, (message) => ({ ...message, statusText: '正在停止生成...' }))
   streamHandle.controller.abort()
+  if (!conversationId) {
+    updateAssistantMessage(assistantMessageId, (message) => ({
+      ...message,
+      status: 'STOPPED',
+      statusText: '已停止生成'
+    }))
+    isStopping.value = false
+    return
+  }
 
   try {
     const result = await chatApi.stopSession(conversationId)
@@ -708,7 +800,7 @@ onBeforeUnmount(() => {
                 <SparklesIcon class="size-5" />
               </span>
               <h2 class="mt-4 text-xl font-semibold leading-snug text-foreground">从一个具体问题开始</h2>
-              <p class="mx-auto mt-2 max-w-xl leading-7 text-muted-foreground">可以直接提问，也可以先在输入区设置知识库和回答范围。</p>
+              <p class="mx-auto mt-2 max-w-xl leading-7 text-muted-foreground">{{ knowledgeAccessHint }}</p>
               <div class="mx-auto mt-5 grid max-w-xl gap-2 sm:grid-cols-3">
                 <Button
                   v-for="prompt in promptChips"
@@ -717,6 +809,7 @@ onBeforeUnmount(() => {
                   size="lg"
                   class="h-auto min-h-11 whitespace-normal rounded-md px-3 py-2 text-left leading-5"
                   type="button"
+                  :disabled="!canUsePromptChip"
                   @click="sendMessage(prompt.text)"
                 >
                   {{ prompt.label }}
@@ -752,20 +845,24 @@ onBeforeUnmount(() => {
 
       <footer class="flex-none border-t border-border bg-card px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-5">
         <div class="mx-auto max-w-[920px]">
-          <details class="group mb-2 border-b border-border pb-2">
+          <details class="group mb-2 border-b border-border pb-2" @toggle="onSettingsToggle">
             <summary class="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-md px-2 text-sm text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40 sm:min-h-9">
               <span class="truncate">回答范围：{{ answerScopeSummary }}</span>
               <span class="shrink-0 text-xs text-primary group-open:hidden">展开设置</span>
               <span class="hidden shrink-0 text-xs text-primary group-open:inline">收起设置</span>
             </summary>
 
-            <div class="mt-2 grid max-h-[26dvh] gap-4 overflow-y-auto rounded-md bg-muted/60 p-3 lg:grid-cols-[minmax(15rem,1.2fr)_minmax(14rem,1fr)]">
+            <div
+              class="mt-2 grid max-h-[26dvh] gap-4 overflow-y-auto rounded-md bg-muted/60 p-3 lg:grid-cols-[minmax(15rem,1.2fr)_minmax(14rem,1fr)]"
+              :inert="!settingsOpen"
+              :aria-hidden="!settingsOpen"
+            >
               <fieldset class="min-w-0">
                 <legend class="mb-2 text-xs font-medium text-muted-foreground">知识库范围</legend>
                 <div v-if="loadingKnowledgeBaseOptions" class="grid gap-2">
                   <Skeleton v-for="index in 3" :key="index" class="h-9 w-full" />
                 </div>
-                <p v-else-if="!knowledgeBaseOptions.length" class="text-sm text-muted-foreground">暂无可用知识库，可在管理端创建。</p>
+                <p v-else-if="!knowledgeBaseOptions.length" class="text-sm text-muted-foreground">当前没有可检索的知识库，请联系知识库管理员授权。</p>
                 <div v-else class="grid max-h-32 gap-1 overflow-y-auto">
                   <label
                     v-for="item in knowledgeBaseOptions"

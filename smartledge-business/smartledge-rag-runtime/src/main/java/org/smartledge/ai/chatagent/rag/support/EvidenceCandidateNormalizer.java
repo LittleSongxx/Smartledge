@@ -1,5 +1,6 @@
 package org.smartledge.ai.chatagent.rag.support;
 
+import org.smartledge.ai.chatagent.rag.model.EvidenceKind;
 import org.smartledge.ai.rag.runtime.support.DocumentKnowledgeMetadataKeys;
 import org.smartledge.ai.rag.runtime.model.RetrievalDocument;
 
@@ -40,8 +41,15 @@ public final class EvidenceCandidateNormalizer {
             metadata.remove(DocumentKnowledgeMetadataKeys.CONTEXT_IDENTITY);
         }
         metadata.put(DocumentKnowledgeMetadataKeys.CITATION_EVIDENCE_TYPE, EvidenceIdentityResolver.citationEvidenceType(document).name());
+        EvidenceKind kind = EvidenceIdentityResolver.evidenceKind(document);
+        if (kind != null) {
+            metadata.put(DocumentKnowledgeMetadataKeys.EVIDENCE_KIND, kind.name());
+        }
+        else {
+            metadata.remove(DocumentKnowledgeMetadataKeys.EVIDENCE_KIND);
+        }
         boolean citationCapable = EvidenceIdentityResolver.isCitationCapable(document);
-        boolean contextOnly = !citationCapable && EvidenceCandidateIdentity.isContextCandidate(document);
+        boolean contextOnly = !citationCapable;
         metadata.put(DocumentKnowledgeMetadataKeys.CONTEXT_ONLY, contextOnly);
         metadata.put(DocumentKnowledgeMetadataKeys.SOURCE_EVIDENCE_RESOLVED, citationCapable);
         EvidenceQualityFeatures.resolve(document).writeTo(metadata);

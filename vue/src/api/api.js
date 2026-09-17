@@ -1,4 +1,9 @@
 import { clearChatAuth, getChatToken } from '../utils/chatAuth'
+import {
+  isPortfolioBlockedPath,
+  isPortfolioDemoActor,
+  PORTFOLIO_READONLY_MESSAGE
+} from '../utils/demoAccounts'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 const REQUEST_TIMEOUT = 30000
@@ -59,16 +64,21 @@ function handleUnauthorized(path, response) {
   }
   const audience = resolveAudience(path)
   const currentPath = window.location.pathname
+  const currentSearch = window.location.search || ''
+  const redirect = encodeURIComponent(`${currentPath}${currentSearch}`)
   if (audience === 'admin') {
     clearAdminAuth()
     if (currentPath.startsWith('/admin') && currentPath !== '/admin/login') {
-      window.location.href = '/admin/login'
+      window.location.href = `/admin/login?redirect=${redirect}`
     }
     return
   }
   clearChatAuth()
+  if (currentPath.startsWith('/admin')) {
+    return
+  }
   if (currentPath !== '/login') {
-    window.location.href = '/login'
+    window.location.href = `/login?redirect=${redirect}`
   }
 }
 
@@ -117,7 +127,14 @@ async function readResponseMessage(response) {
   }
 }
 
+function assertPortfolioPathAllowed(path) {
+  if (isPortfolioDemoActor() && isPortfolioBlockedPath(path)) {
+    throw new APIError(PORTFOLIO_READONLY_MESSAGE, 403)
+  }
+}
+
 async function requestJson(path, options = {}) {
+  assertPortfolioPathAllowed(path)
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT)
 
@@ -156,6 +173,7 @@ function unwrapApiResponse(payload, fallbackMessage = '请求失败') {
 }
 
 async function requestApiEnvelope(path, options = {}) {
+  assertPortfolioPathAllowed(path)
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT)
 
@@ -183,6 +201,7 @@ async function requestApiEnvelope(path, options = {}) {
 }
 
 async function requestMultipartApiEnvelope(path, formData, options = {}) {
+  assertPortfolioPathAllowed(path)
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT)
 
@@ -223,6 +242,7 @@ function extractDownloadFileName(disposition) {
 }
 
 async function requestBlob(path, options = {}) {
+  assertPortfolioPathAllowed(path)
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT)
 
@@ -860,6 +880,67 @@ export const manageApi = {
     return requestApiEnvelope('/manage/observability/quality/overview/query', {
       method: 'POST',
       body: stringifyManageValue(payload)
+    })
+  },
+
+  listObservabilitySessionsPage(query = {}) {
+    return requestApiEnvelope('/manage/observability/session/page/query', {
+      method: 'POST',
+      body: stringifyManageValue({
+        keyword: String(query.keyword || '').trim(),
+        chatMode: String(query.chatMode || 'ALL').trim(),
+        turnStatus: String(query.turnStatus || 'ALL').trim(),
+        pageNo: normalizePageString(query.pageNo, '1'),
+        pageSize: normalizePageString(query.pageSize, '20')
+      })
+    }).then((data) => ({
+      pageNo: data?.pageNo || '1',
+      pageSize: data?.pageSize || '20',
+      totalSize: data?.totalSize || '0',
+      totalPages: data?.totalPages || '0',
+      sessions: data?.sessions || []
+    }))
+  },
+
+  getObservabilitySession(conversationId) {
+    return requestApiEnvelope('/manage/observability/session/detail/query', {
+      method: 'POST',
+      body: stringifyManageValue({ conversationId })
+    })
+  },
+
+  getObservabilityExchangeDetail(conversationId, exchangeId) {
+    return requestApiEnvelope('/manage/observability/exchange/detail/query', {
+      method: 'POST',
+      body: stringifyManageValue({ conversationId, exchangeId: String(exchangeId) })
+    })
+  },
+
+  getObservabilityRetrievalResults(conversationId, exchangeId) {
+    return requestApiEnvelope('/manage/observability/exchange/retrieval/results', {
+      method: 'POST',
+      body: stringifyManageValue({ conversationId, exchangeId: String(exchangeId) })
+    })
+  },
+
+  getObservabilityChannelExecutions(conversationId, exchangeId) {
+    return requestApiEnvelope('/manage/observability/exchange/channel/executions', {
+      method: 'POST',
+      body: stringifyManageValue({ conversationId, exchangeId: String(exchangeId) })
+    })
+  },
+
+  rebuildObservabilityConversationSummary(conversationId) {
+    return requestApiEnvelope('/manage/observability/session/summary/rebuild', {
+      method: 'POST',
+      body: stringifyManageValue({ conversationId })
+    })
+  },
+
+  getObservabilityStageBenchmarks() {
+    return requestApiEnvelope('/manage/observability/stage/benchmarks', {
+      method: 'POST',
+      body: {}
     })
   },
 

@@ -38,7 +38,6 @@ public class ContextExpansionPlanner {
 
     private static final int STRUCTURE_ANCHOR_MAX_PER_ANCHOR = 2;
     private static final int STRUCTURE_ANCHOR_MAX_TOTAL = 4;
-    private static final String PARENT_BLOCK_CONTEXT = "PARENT_BLOCK";
     private static final String GRAPH_WRAPPER_CONTEXT = "GRAPH_WRAPPER";
     private static final String RAPTOR_WRAPPER_CONTEXT = "RAPTOR_WRAPPER";
     private static final String STRUCTURE_NAVIGATION_CONTEXT = "STRUCTURE_NAVIGATION";
@@ -356,7 +355,7 @@ public class ContextExpansionPlanner {
             if (!originalDocumentIds.contains(candidate.getId())
                 && metadataLong(candidate.getMetadata(), DocumentKnowledgeMetadataKeys.PARENT_BLOCK_ID) != null) {
                 EvidenceCandidateIdentity.assignNew(candidate);
-                markContextArtifact(candidate, PARENT_BLOCK_CONTEXT);
+                EvidenceCandidateNormalizer.enrichIdentity(candidate);
             }
             merged.add(candidate);
         }
@@ -370,21 +369,25 @@ public class ContextExpansionPlanner {
     }
 
     /**
-     * 在 evidence budget 前把 Source Evidence 与 Context Only 物理分池。Graph/RAPTOR wrapper 保留为背景，
-     * 对应的 source-authored snippet 以独立 RetrievalDocument 投影进入 Source pool。
+     * 有稳定 identity 的候选进入 Source。Context Only 只留给无 identity 的导航装饰或重复包装壳。
      */
     public EvidenceCandidatePools partitionCandidates(List<RetrievalDocument> rankedCandidates,
                                                       List<RetrievalDocument> independentContextCandidates) {
         Map<String, RetrievalDocument> sourceByIdentity = new LinkedHashMap<>();
         Map<String, RetrievalDocument> contextByIdentity = new LinkedHashMap<>();
-        // 确定性导航结果必须先于普通 wrapper 进入同一 Context Only 预算队列。
         if (independentContextCandidates != null) {
             for (RetrievalDocument candidate : independentContextCandidates) {
                 if (candidate == null) {
                     continue;
                 }
-                markContextArtifact(candidate, STRUCTURE_NAVIGATION_CONTEXT);
-                addContext(contextByIdentity, candidate);
+                EvidenceCandidateNormalizer.enrichIdentity(candidate);
+                if (EvidenceIdentityResolver.isCitationCapable(candidate)) {
+                    addSource(sourceByIdentity, candidate);
+                }
+                else {
+                    markContextArtifact(candidate, STRUCTURE_NAVIGATION_CONTEXT);
+                    addContext(contextByIdentity, candidate);
+                }
             }
         }
         if (rankedCandidates != null) {
@@ -392,12 +395,16 @@ public class ContextExpansionPlanner {
                 if (candidate == null) {
                     continue;
                 }
-                EvidenceCandidateIdentity.ensure(candidate);
+                EvidenceCandidateNormalizer.enrichIdentity(candidate);
                 RetrievalDocument sourceProjection = sourceProjection(candidate);
-                if (sourceProjection != null) {
+                if (sourceProjection != null
+                    && !EvidenceIdentityResolver.sameCitationEvidence(sourceProjection, candidate)) {
                     addSource(sourceByIdentity, sourceProjection);
                 }
-                if (isDerivedWrapper(candidate) || sourceProjection == null) {
+                if (EvidenceIdentityResolver.isCitationCapable(candidate)) {
+                    addSource(sourceByIdentity, candidate);
+                }
+                else {
                     RetrievalDocument contextCandidate = sourceProjection == null
                         ? candidate
                         : copyForContext(candidate);

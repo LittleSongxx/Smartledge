@@ -12,9 +12,11 @@ import org.smartledge.ai.rag.runtime.agent.AgentState;
 import org.smartledge.ai.rag.runtime.agent.AgentStatePort;
 import org.smartledge.ai.chatagent.agent.AgentTool;
 import org.smartledge.ai.chatagent.agent.AgentToolContext;
+import org.smartledge.ai.chatagent.agent.ToolCallOutcome;
 import org.smartledge.ai.rag.runtime.config.ChatAgentProperties;
 import org.smartledge.ai.rag.runtime.model.*;
 import org.smartledge.ai.rag.runtime.port.ChatModelPort;
+import org.smartledge.database.tenant.TenantContext;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -33,12 +35,12 @@ public class ReactAgentExecutor implements ConversationExecutor {
     private final Map<String, AgentTool> tools;
     private final ChatAgentProperties properties;
     private final StreamEventWriter writer;
-    private final String systemPrompt;
+    private final PromptTemplateService prompts;
 
     public ReactAgentExecutor(ChatModelPort model, AgentStatePort states, List<AgentTool> tools,
                               ChatAgentProperties properties, StreamEventWriter writer, PromptTemplateService prompts) {
         this.model = model; this.states = states; this.properties = properties; this.writer = writer;
-        this.systemPrompt = prompts.render(PromptTemplateNames.CHAT_AGENT_SYSTEM, Map.of());
+        this.prompts = prompts;
         Map<String, AgentTool> registered = new LinkedHashMap<>();
         for (AgentTool tool : tools) {
             if (registered.putIfAbsent(tool.definition().name(), tool) != null) throw new IllegalArgumentException("Duplicate tool");
@@ -79,10 +81,10 @@ public class ReactAgentExecutor implements ConversationExecutor {
                 synchronized (task) {
                     context.checkActive();
                     ExecutorEventSupport.publishThinking(task, writer, "当前问题进入开放式 Agent 自主执行阶段。");
-                    task.debugTrace().getRetrievalNotes().add("当前问题走 ReactAgent 执行路径，由 Agent 自主决定是否调用联网搜索或其他工具。");
+                    task.debugTrace().getRetrievalNotes().add("当前问题走 ReactAgent 执行路径，由 Agent 自主决定是否调用知识库检索、长期记忆或联网搜索。");
                     stage = task.traceRecorder() == null ? null : task.traceRecorder().startStage(
                         ConversationTraceStageCode.REACT_AGENT, mode().name(), "正在执行 ReAct Agent 推理与工具调用。", null);
-                    state = states.begin(task.conversationId(), task.exchangeId());
+                    state = withTaskTenant(task, () -> states.begin(task.conversationId(), task.exchangeId()));
                     List<ChatMessage> history = new ArrayList<>(state.messages());
                     history.add(ChatMessage.text("user", task.executionPlan().getAgentQuestion()));
                     save(state.modelCalls(), state.toolCalls(), history, true);
@@ -98,7 +100,7 @@ public class ReactAgentExecutor implements ConversationExecutor {
                 save(state.modelCalls() + 1, state.toolCalls(), state.messages(), false); modelRun++;
             }
             List<ChatMessage> messages = new ArrayList<>();
-            messages.add(ChatMessage.text("system", systemPrompt)); messages.addAll(state.messages());
+            messages.add(ChatMessage.text("system", systemPrompt(task))); messages.addAll(state.messages());
             StringBuilder text = new StringBuilder();
             ChatResult[] completed = new ChatResult[1];
             return model.stream(messages, tools.values().stream().map(AgentTool::definition).toList(), ChatCallOptions.builder().build())
@@ -135,11 +137,13 @@ public class ReactAgentExecutor implements ConversationExecutor {
             }
             return Flux.fromIterable(calls)
                 .flatMapSequential(call -> Mono.using(() -> new AgentToolContext(task), toolContext ->
-                    Mono.fromCallable(() -> invoke(call, toolContext)).subscribeOn(Schedulers.boundedElastic())
+                    Mono.fromCallable(() -> withTaskTenant(task, () -> invoke(call, toolContext)))
+                        .subscribeOn(Schedulers.boundedElastic())
                         .timeout(tools.containsKey(call.name()) ? tools.get(call.name()).timeout() : java.time.Duration.ofSeconds(30)),
                     AgentToolContext::cancel, true)
                     .onErrorResume(java.util.concurrent.TimeoutException.class,
-                        error -> Mono.just(toolResult(call, "Tool failed: timeout"))), 4, 1)
+                        error -> Mono.just(unknownTimeout(call))),
+                    4, 1)
                 .collectList().flatMapMany(results -> {
                     synchronized (task) {
                         context.checkActive();
@@ -151,27 +155,51 @@ public class ReactAgentExecutor implements ConversationExecutor {
                 });
         }
         ChatMessage invoke(ChatResult.ToolCall call, AgentToolContext context) throws Exception {
+            long started = System.currentTimeMillis();
             context.checkActive();
             AgentTool tool = tools.get(call.name());
-            if (tool == null) return toolResult(call, "Tool failed: unknown tool " + call.name());
+            if (tool == null) {
+                ToolCallOutcome outcome = ToolCallOutcome.rejected(call.name(), "UNKNOWN_TOOL", "未知工具: " + call.name());
+                context.recordOutcome(outcome);
+                return toolResult(call, outcome.toEnvelope());
+            }
             for (int attempt = 0; ; attempt++) {
                 context.checkActive();
                 try {
                     String result = tool.execute(call.arguments(), context);
                     context.checkActive();
                     if (result == null) throw new IllegalStateException("Empty tool result");
+                    context.recordOutcome(ToolCallOutcome.succeeded(call.name(), elapsed(started)));
                     return toolResult(call, result);
-                } catch (CancellationException e) { throw e;
-                } catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new CancellationException("Agent cancelled");
+                } catch (CancellationException e) {
+                    context.recordOutcome(ToolCallOutcome.cancelled(call.name(), elapsed(started)));
+                    throw e;
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    context.recordOutcome(ToolCallOutcome.cancelled(call.name(), elapsed(started)));
+                    throw new CancellationException("Agent cancelled");
                 } catch (Exception e) {
                     context.checkActive();
-                    if (e instanceof IllegalArgumentException || attempt == 2)
-                        return toolResult(call, "Tool failed: " + e.getClass().getSimpleName());
+                    if (e instanceof IllegalArgumentException || attempt == 2) {
+                        ToolCallOutcome outcome = ToolCallOutcome.failed(
+                            call.name(),
+                            e.getClass().getSimpleName(),
+                            "工具调用失败",
+                            elapsed(started)
+                        );
+                        context.recordOutcome(outcome);
+                        return toolResult(call, outcome.toEnvelope());
+                    }
                     // One logical tool reservation, at most three physical attempts. Hard cap includes jitter.
                     long delay = Math.min(1200, (long) (200 * (1L << attempt) * ThreadLocalRandom.current().nextDouble(.75, 1.25)));
                     Thread.sleep(delay);
                 }
             }
+        }
+        ChatMessage unknownTimeout(ChatResult.ToolCall call) {
+            ToolCallOutcome outcome = ToolCallOutcome.unknown(call.name(), "TIMEOUT", "工具超时，结果未知", 0L);
+            context.recordOutcome(outcome);
+            return toolResult(call, outcome.toEnvelope());
         }
         ChatMessage toolResult(ChatResult.ToolCall call, String result) {
             return new ChatMessage("tool", result, List.of(), call.id());
@@ -186,20 +214,54 @@ public class ReactAgentExecutor implements ConversationExecutor {
             return Flux.empty();
         }
         void save(int models, int toolCount, List<ChatMessage> history, boolean checkpoint) {
-            context.checkActive(); state = states.save(state, models, toolCount, history, checkpoint);
+            context.checkActive();
+            state = withTaskTenant(task, () -> states.save(state, models, toolCount, history, checkpoint));
         }
         void close(Throwable error) {
             synchronized (task) {
                 if (!closed.compareAndSet(false, true)) return;
-                try { if (state != null) states.finish(state); }
+                try { if (state != null) withTaskTenant(task, () -> { states.finish(state); return null; }); }
                 finally {
                     if (task.traceRecorder() != null && stage != null) {
                         if (error == null) task.traceRecorder().completeStage(stage, "ReAct Agent 执行完成。", Map.of(
-                            "toolNames", task.debugTrace().getToolTraces(), "usedTools", task.usedTools()));
+                            "toolNames", task.debugTrace().getToolTraces(),
+                            "usedTools", task.usedTools(),
+                            "toolOutcomes", task.toolOutcomes().stream().map(ToolCallOutcome::toEnvelope).toList()));
                         else task.traceRecorder().failStage(stage, "ReAct Agent 执行失败。", error.getMessage(), null);
                     }
                 }
             }
         }
+    }
+
+    private String systemPrompt(TaskInfo task) {
+        var plan = task.executionPlan();
+        return prompts.render(PromptTemplateNames.CHAT_AGENT_SYSTEM, Map.of(
+            "longTermFacts", plan == null || plan.getLongTermFactsText() == null ? "" : plan.getLongTermFactsText(),
+            "longTermSummary", plan == null || plan.getLongTermSummary() == null ? "" : plan.getLongTermSummary()
+        ));
+    }
+
+    private static long elapsed(long started) {
+        return Math.max(0L, System.currentTimeMillis() - started);
+    }
+
+    private static <T> T withTaskTenant(TaskInfo task, TenantAction<T> action) {
+        return TenantContext.callWith(task.tenantId(), () -> {
+            try {
+                return action.run();
+            }
+            catch (RuntimeException exception) {
+                throw exception;
+            }
+            catch (Exception exception) {
+                throw new IllegalStateException(exception);
+            }
+        });
+    }
+
+    @FunctionalInterface
+    private interface TenantAction<T> {
+        T run() throws Exception;
     }
 }

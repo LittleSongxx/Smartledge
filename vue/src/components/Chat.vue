@@ -31,6 +31,7 @@ const emit = defineEmits(['recommend', 'retry'])
 const contentRef = ref(null)
 const citationDisclosureRef = ref(null)
 const copied = ref(false)
+const copyFailed = ref(false)
 
 hljs.registerLanguage('bash', bash)
 hljs.registerLanguage('java', java)
@@ -41,7 +42,10 @@ hljs.registerLanguage('xml', xml)
 hljs.registerLanguage('yaml', yaml)
 
 const isUser = computed(() => props.message.role === 'user')
-const copyButtonTitle = computed(() => copied.value ? '已复制' : '复制内容')
+const copyButtonTitle = computed(() => {
+  if (copyFailed.value) return '复制失败，请手动选择文本'
+  return copied.value ? '已复制' : '复制内容'
+})
 const hasAssistantContent = computed(() => !isUser.value && Boolean(props.message.content))
 const showStatusNotice = computed(() => !isUser.value && Boolean(props.message.statusText))
 const showErrorNotice = computed(() => !isUser.value && Boolean(props.message.errorMessage))
@@ -119,12 +123,15 @@ function handleContentClick(event) {
 }
 
 async function copyContent() {
+  copyFailed.value = false
   try {
     await navigator.clipboard.writeText(copyableText.value || '')
     copied.value = true
     window.setTimeout(() => { copied.value = false }, 1800)
   } catch (error) {
     console.error('复制消息失败', error)
+    copyFailed.value = true
+    window.setTimeout(() => { copyFailed.value = false }, 2400)
   }
 }
 

@@ -353,7 +353,7 @@
                 <div class="config-grid">
                   <div v-for="field in raptorBuildNumberFields" :key="field.key" class="grid gap-2">
                     <Label class="field-label">{{ field.label }}</Label>
-                    <Input v-model="configForm[field.key]" type="number" :step="field.step" :min="field.min" class="h-9 text-sm" :disabled="drawerReadOnly" />
+                    <Input v-model="configForm[field.key]" type="number" :step="field.step" :min="field.min" :max="field.max" class="h-9 text-sm" :disabled="drawerReadOnly" />
                   </div>
                 </div>
               </section>
@@ -380,6 +380,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ArrowPathIcon, PlusIcon } from '@heroicons/vue/24/outline'
 import { manageApi } from '../../api/api'
+import { denyPortfolioWrite } from '../../utils/demoAccounts'
 import { formatDateTime } from '../../utils/manageFormat'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -395,6 +396,7 @@ import FilterToolbar from '@/components/system/FilterToolbar.vue'
 import PageHeader from '@/components/system/PageHeader.vue'
 import StatusBadge from '@/components/system/StatusBadge.vue'
 import { createLatestRequestGuard, filterKnowledgeBases } from '@/features/admin/adminBehavior'
+import { getAdminOperatorId } from '../../utils/adminAuth'
 import {
   buildMetadataFilterJson,
   createMetadataFilterDraft,
@@ -490,8 +492,8 @@ const buildToggleFields = [
 ]
 
 const raptorBuildNumberFields = [
-  { key: 'raptorMaxClusterSize', label: 'RAPTOR 簇大小', min: '2', step: '1', integer: true },
-  { key: 'raptorMaxLevels', label: 'RAPTOR 最大层数', min: '1', step: '1', integer: true },
+  { key: 'raptorMaxClusterSize', label: 'RAPTOR 簇大小', min: '2', max: '50', step: '1', integer: true },
+  { key: 'raptorMaxLevels', label: 'RAPTOR 最大层数', min: '1', max: '8', step: '1', integer: true },
   { key: 'raptorSummaryQualityFloor', label: '摘要质量阈值', min: '0', step: '0.01' }
 ]
 
@@ -597,7 +599,7 @@ function emptyForm() {
     raptorConfigJson: '',
     isDefault: '0',
     sortOrder: '0',
-    operatorId: '10001'
+    operatorId: getAdminOperatorId()
   }
 }
 
@@ -614,6 +616,7 @@ function resetForm() {
 }
 
 function openCreateDrawer() {
+  if (denyPortfolioWrite((message) => showNotice(message, 'danger'))) return
   resetForm()
   drawerTarget.value = null
   drawerMode.value = 'create'
@@ -628,6 +631,7 @@ function openViewDrawer(item) {
 }
 
 function openEditDrawer(item) {
+  if (denyPortfolioWrite((message) => showNotice(message, 'danger'))) return
   editKnowledgeBase(item)
   drawerTarget.value = { ...item }
   drawerMode.value = 'edit'
@@ -696,7 +700,7 @@ function editKnowledgeBase(item) {
     retrievalConfigJson: itemInput.retrievalConfigJson ?? '',
     graphRagConfigJson: itemInput.graphRagConfigJson ?? '',
     raptorConfigJson: itemInput.raptorConfigJson ?? '',
-    operatorId: itemInput.operatorId ?? '10001',
+    operatorId: itemInput.operatorId ?? getAdminOperatorId(),
     id: String(itemInput.id || ''),
     isDefault: String(itemInput.isDefault || '0'),
     sortOrder: String(itemInput.sortOrder || '0')
@@ -900,6 +904,7 @@ async function loadSystemConfig() {
 }
 
 async function saveKnowledgeBase() {
+  if (denyPortfolioWrite((message) => showNotice(message, 'danger'))) return
   if (actionLoading.value) return
   if (!form.baseName.trim()) {
     showNotice('知识库名称不能为空。', 'danger')
@@ -1026,10 +1031,11 @@ function readNumber(key) {
 }
 
 async function deleteKnowledgeBase(item) {
+  if (denyPortfolioWrite((message) => showNotice(message, 'danger'))) return
   if (!item?.id || !await confirm(`确认删除知识库「${item.baseName}」吗？`)) return
   actionLoading.value = true
   try {
-    await manageApi.deleteKnowledgeBase({ id: item.id, operatorId: '10001' })
+    await manageApi.deleteKnowledgeBase({ id: item.id, operatorId: getAdminOperatorId() })
     if (String(form.id) === String(item.id) || String(drawerTarget.value?.id) === String(item.id)) closeDrawer()
     showNotice('知识库已删除。')
     await loadKnowledgeBases()

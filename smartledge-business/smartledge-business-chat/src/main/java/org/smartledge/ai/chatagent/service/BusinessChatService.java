@@ -8,6 +8,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.smartledge.ai.rag.runtime.config.ChatAgentProperties;
 import org.smartledge.ai.rag.runtime.agent.AgentState;
 import org.smartledge.ai.rag.runtime.model.ChatMessage;
+import org.smartledge.ai.auth.support.DemoChatQuota;
+import org.smartledge.ai.auth.support.PortfolioPermissions;
 import org.smartledge.ai.chatagent.dto.ChatRequestDto;
 import org.smartledge.ai.chatagent.dto.ConversationSessionListQueryDto;
 import org.smartledge.ai.chatagent.model.ConversationExchangeDetailView;
@@ -26,6 +28,7 @@ import org.smartledge.ai.chatagent.rag.model.ConversationExecutionPlan;
 import org.smartledge.ai.chatagent.rag.model.PromptRenderedSourceEvidence;
 import org.smartledge.ai.chatagent.rag.model.RagPromptAssemblyResult;
 import org.smartledge.ai.chatagent.rag.model.RetrievalPlan;
+import org.smartledge.ai.chatagent.rag.service.ExplicitCitationBindingResult;
 import org.smartledge.ai.chatagent.rag.service.ExplicitCitationBindingService;
 import org.smartledge.ai.chatagent.support.CodeProvenanceResolver;
 import org.smartledge.ai.rag.runtime.model.KnowledgeDocumentDescriptor;
@@ -41,6 +44,7 @@ import org.smartledge.ai.prompt.PromptTemplateNames;
 import org.smartledge.ai.prompt.PromptTemplateService;
 import org.smartledge.ai.rag.runtime.model.KnowledgeBaseSelectionSnapshot;
 import org.smartledge.database.tenant.TenantContext;
+import org.smartledge.enums.BaseCode;
 import org.smartledge.enums.ChatTurnStatus;
 import org.smartledge.enums.ChatQueryMode;
 import org.smartledge.enums.KnowledgeBaseSelectionMode;
@@ -85,7 +89,6 @@ import java.util.concurrent.ConcurrentHashMap;
 public class BusinessChatService {
 
     private static final ZoneId CHAT_ZONE_ID = ZoneId.of("Asia/Shanghai");
-    private static final String CHAT_RUNNING_LEASE_PREFIX = "chat:running:";
     private static final String SOURCE_SNAPSHOT_VISIBILITY = "GENERATION_VISIBLE";
     private static final Duration CHAT_RUNNING_LEASE_TTL = Duration.ofSeconds(30);
     private static final Duration CHAT_RUNNING_LEASE_RENEW_INTERVAL = Duration.ofSeconds(10);
@@ -109,9 +112,11 @@ public class BusinessChatService {
     private final KnowledgeScopePort knowledgeBaseRetrievalScopeService;
     private final KnowledgeBaseCatalogPort knowledgeBaseCatalogPort;
     private final ConversationAccessGuard conversationAccessGuard;
+    private final ConversationIdentityService conversationIdentityService;
     private final DocumentAclStore documentAclStore;
     private final org.smartledge.ai.manage.service.KnowledgeManageService knowledgeManageService;
     private final CodeProvenanceResolver codeProvenanceResolver;
+    private final DemoChatQuota demoChatQuota;
 
     public Flux<String> openConversationStream(ChatRequestDto request) {
 
@@ -230,6 +235,7 @@ public class BusinessChatService {
             launchPlan.getChatMode(),
             traceId,
             tenantId,
+            conversationAccessGuard.requireCurrentUserId(),
             launchPlan.getSelectedDocumentId(),
             launchPlan.getSelectedDocumentName(),
             launchPlan.getSelectedTaskId(),
@@ -309,10 +315,25 @@ public class BusinessChatService {
 
         String question = normalizeQuestion(request.getQuestion());
 
-        String conversationId = normalizeConversationId(request.getConversationId());
-        // 会话归属是硬边界：新会话允许创建（本轮会写入归属），已存在的会话必须是自己的。
+        RequestIdentity identity = conversationAccessGuard.requireIdentity();
+        String conversationId = conversationIdentityService.resolveForLaunch(request.getConversationId(), identity);
         conversationAccessGuard.requireOwnedOrNew(conversationId);
         ChatQueryMode chatMode = parseRequiredChatMode(request.getChatMode());
+        if (PortfolioPermissions.isDemo(identity)) {
+            if (chatMode == ChatQueryMode.OPEN_CHAT) {
+                throw new SuperAgentFrameException(
+                    BaseCode.PARAMETER_ERROR.getCode(),
+                    PortfolioPermissions.OPEN_CHAT_BLOCKED_MESSAGE
+                );
+            }
+            if (question.length() > PortfolioPermissions.MAX_QUESTION_CHARS) {
+                throw new SuperAgentFrameException(
+                    BaseCode.PARAMETER_ERROR.getCode(),
+                    PortfolioPermissions.QUESTION_TOO_LONG_MESSAGE
+                );
+            }
+            demoChatQuota.consumeOrThrow(identity.userId());
+        }
         KnowledgeBaseSelectionMode selectionMode = parseKnowledgeBaseSelectionMode(request.getKnowledgeBaseSelectionMode());
         validateChatModeAndKnowledgeBaseSelection(chatMode, selectionMode);
 
@@ -334,7 +355,7 @@ public class BusinessChatService {
             selectedDocument == null ? null : selectedDocument.getLastIndexTaskId(),
             knowledgeBaseSelection,
 
-            buildChatLeaseKey(conversationId),
+            ConversationRuntimeKeys.leaseKey(identity.tenantId(), conversationId),
 
             UUID.randomUUID().toString(),
             currentDate,
@@ -384,7 +405,8 @@ public class BusinessChatService {
 
     public ConversationStopVo stopConversation(String conversationId, String reason) {
         conversationAccessGuard.requireOwned(conversationId);
-        Optional<TaskInfo> taskInfoOptional = chatRuntimeRegistry.get(conversationId);
+        Optional<TaskInfo> taskInfoOptional = chatRuntimeRegistry.get(
+            conversationAccessGuard.requireIdentity().tenantId(), conversationId);
         if (taskInfoOptional.isEmpty()) {
             return new ConversationStopVo(conversationId, false, "没有找到正在执行的会话");
         }
@@ -397,7 +419,7 @@ public class BusinessChatService {
             return new ConversationStopVo(taskInfo.conversationId(), false, "会话已经结束");
         }
 
-        Optional<TaskInfo> currentTask = chatRuntimeRegistry.get(taskInfo.conversationId());
+        Optional<TaskInfo> currentTask = chatRuntimeRegistry.get(taskInfo.tenantId(), taskInfo.conversationId());
         if (currentTask.isPresent() && currentTask.get() != taskInfo) {
 
             return new ConversationStopVo(taskInfo.conversationId(), false, "会话已由新的执行接管");
@@ -436,7 +458,8 @@ public class BusinessChatService {
             }
             try {
                 refreshDebugTraceRuntimeStats(taskInfo);
-                List<SearchReference> sourceSnapshot = bindTerminalSourceSnapshot(taskInfo);
+                ExplicitCitationBindingResult binding = bindTerminalSourceSnapshot(taskInfo);
+                List<SearchReference> sourceSnapshot = binding.retrievedSources();
                 conversationArchiveStore.completeExchange(
                     taskInfo.conversationId(),
                     taskInfo.exchangeId(),
@@ -452,7 +475,7 @@ public class BusinessChatService {
                     System.currentTimeMillis() - taskInfo.startTime()
                 );
                 if (taskInfo.traceRecorder() != null) {
-                    Map<String, Object> finalizeSnapshot = sourceSnapshotTrace(sourceSnapshot);
+                    Map<String, Object> finalizeSnapshot = sourceSnapshotTrace(binding);
                     finalizeSnapshot.put("finalStatus", ChatTurnStatus.STOPPED.name());
                     finalizeSnapshot.put("reason", reason);
                     finalizeSnapshot.put("answerLength", taskInfo.answerBuffer().length());
@@ -479,15 +502,36 @@ public class BusinessChatService {
     }
 
     public ConversationSessionView getSession(String conversationId) {
-        conversationAccessGuard.requireOwned(conversationId);
+        return loadSession(conversationId, false);
+    }
+
+    public ConversationSessionView getObservableSession(String conversationId) {
+        return loadSession(conversationId, true);
+    }
+
+    private ConversationSessionView loadSession(String conversationId, boolean tenantObserve) {
+        if (tenantObserve) {
+            conversationAccessGuard.requireVisibleInTenant(conversationId);
+        }
+        else {
+            conversationAccessGuard.requireOwned(conversationId);
+        }
         ConversationArchiveStore.ConversationArchiveRecord archiveRecord = conversationArchiveStore.getSessionRecord(conversationId)
             .orElseThrow(() -> new IllegalArgumentException("会话不存在: " + conversationId));
         return overlayRuntimeSnapshot(toSessionView(archiveRecord, true, true));
     }
 
     public ConversationExchangeDetailView getExchangeDetail(String conversationId, String exchangeId) {
+        return getExchangeDetail(conversationId, exchangeId, false);
+    }
+
+    public ConversationExchangeDetailView getObservableExchangeDetail(String conversationId, String exchangeId) {
+        return getExchangeDetail(conversationId, exchangeId, true);
+    }
+
+    private ConversationExchangeDetailView getExchangeDetail(String conversationId, String exchangeId, boolean tenantObserve) {
         long resolvedExchangeId = parseRequiredLong(exchangeId, "exchangeId");
-        ConversationSessionView sessionView = getSession(conversationId);
+        ConversationSessionView sessionView = loadSession(conversationId, tenantObserve);
         ConversationExchangeView exchangeView = sessionView.getExchanges().stream()
             .filter(item -> item != null && item.getExchangeId() == resolvedExchangeId)
             .findFirst()
@@ -514,6 +558,29 @@ public class BusinessChatService {
             turnStatus,
             conversationAccessGuard.requireCurrentUserId()
         );
+        return toSessionListVo(archivePage);
+    }
+
+    public ConversationSessionListVo listObservableSessions(ConversationSessionListQueryDto dto) {
+        Long ownerUserId = conversationAccessGuard.observeOwnerFilter();
+        int pageNo = parsePositiveInt(dto == null ? null : dto.getPageNo(), 1);
+        int pageSize = parsePositiveInt(dto == null ? null : dto.getPageSize(), 20);
+        String keyword = normalizeOptionalText(dto == null ? null : dto.getKeyword());
+        ChatQueryMode chatMode = parseOptionalChatMode(dto == null ? null : dto.getChatMode());
+        ChatTurnStatus turnStatus = parseOptionalTurnStatus(dto == null ? null : dto.getTurnStatus());
+
+        ConversationArchiveStore.ConversationArchivePage archivePage = conversationArchiveStore.listSessionRecordPage(
+            pageNo,
+            pageSize,
+            keyword,
+            chatMode,
+            turnStatus,
+            ownerUserId
+        );
+        return toSessionListVo(archivePage);
+    }
+
+    private ConversationSessionListVo toSessionListVo(ConversationArchiveStore.ConversationArchivePage archivePage) {
         List<ConversationSessionView> sessions = archivePage.records()
             .stream()
             .map(record -> toSessionView(record, false, false))
@@ -567,7 +634,7 @@ public class BusinessChatService {
         List<KnowledgeDocumentDescriptor> retrievable =
             documentKnowledgeService.listRetrievableDocumentsByKnowledgeBaseIds(knowledgeBaseIds);
         if (retrievable == null || retrievable.isEmpty()) {
-            return options.stream().map(option -> withRetrievableCount(option, 0L)).toList();
+            return List.of();
         }
         Set<Long> visibleDocumentIds = documentAclStore.visibleDocumentIds(
             retrievable.stream().map(KnowledgeDocumentDescriptor::getDocumentId).toList(), identity);
@@ -579,6 +646,8 @@ public class BusinessChatService {
             visibleCountByKnowledgeBase.merge(document.getKnowledgeBaseId(), 1L, Long::sum);
         }
         return options.stream()
+            .filter(option -> visibleCountByKnowledgeBase.getOrDefault(
+                parseRequiredLong(option.getId(), "knowledgeBaseId"), 0L) > 0)
             .map(option -> withRetrievableCount(option,
                 visibleCountByKnowledgeBase.getOrDefault(parseRequiredLong(option.getId(), "knowledgeBaseId"), 0L)))
             .toList();
@@ -597,6 +666,11 @@ public class BusinessChatService {
     public ConversationMemorySummaryView rebuildConversationSummary(String conversationId) {
         // 记忆摘要是会话历史的压缩文本，归属校验与读取会话同级。
         conversationAccessGuard.requireOwned(conversationId);
+        return conversationMemoryService.rebuildConversationSummary(conversationId);
+    }
+
+    public ConversationMemorySummaryView rebuildObservableConversationSummary(String conversationId) {
+        conversationAccessGuard.requireVisibleInTenant(conversationId);
         return conversationMemoryService.rebuildConversationSummary(conversationId);
     }
 
@@ -640,6 +714,7 @@ public class BusinessChatService {
 
         String answer = taskInfo.answerBuffer().toString();
         List<SearchReference> uniqueReferences = promptRenderedSourceReferences(taskInfo);
+        ExplicitCitationBindingResult citationBinding = null;
         ConversationTraceRecorder.StageHandle finalizeStage = taskInfo.traceRecorder() == null
             ? null
             : taskInfo.traceRecorder().startStage(
@@ -650,13 +725,14 @@ public class BusinessChatService {
             );
         try {
             assertPromptRenderedSourcesMatchManifest(taskInfo, uniqueReferences);
-            uniqueReferences = explicitCitationBindingService.bind(
+            citationBinding = explicitCitationBindingService.bind(
                 answer,
                 taskInfo.promptAssemblyResult(),
                 taskInfo.traceRecorder(),
                 taskInfo.executionPlan() == null || taskInfo.executionPlan().getMode() == null ? "" : taskInfo.executionPlan().getMode().name()
             );
-            assertSourceSnapshotWithinRenderedSources(taskInfo, uniqueReferences);
+            assertRetrievedMatchesRenderedSources(taskInfo, citationBinding);
+            uniqueReferences = citationBinding.retrievedSources();
         }
         catch (RuntimeException exception) {
             finishPostProcessFailure(taskInfo, finalizeStage, "显式引用绑定失败。", exception, answer);
@@ -727,9 +803,14 @@ public class BusinessChatService {
                     System.currentTimeMillis() - taskInfo.startTime()
                 );
                 if (taskInfo.traceRecorder() != null) {
-                    Map<String, Object> finalizeSnapshot = sourceSnapshotTrace(uniqueReferences);
+                    Map<String, Object> finalizeSnapshot = citationBinding == null
+                        ? sourceSnapshotTrace(uniqueReferences)
+                        : sourceSnapshotTrace(citationBinding);
                     finalizeSnapshot.put("finalStatus", ChatTurnStatus.COMPLETED.name());
                     finalizeSnapshot.put("referenceCount", uniqueReferences.size());
+                    finalizeSnapshot.put("explicitCitationCount", citationBinding == null
+                        ? 0
+                        : citationBinding.explicitCitations().size());
                     finalizeSnapshot.put("recommendationCount", recommendations.size());
                     finalizeSnapshot.put("answerLength", answer.length());
                     taskInfo.traceRecorder().completeStage(
@@ -854,7 +935,8 @@ public class BusinessChatService {
             }
             try {
                 refreshDebugTraceRuntimeStats(taskInfo);
-                List<SearchReference> sourceSnapshot = bindTerminalSourceSnapshot(taskInfo);
+                ExplicitCitationBindingResult binding = bindTerminalSourceSnapshot(taskInfo);
+                List<SearchReference> sourceSnapshot = binding.retrievedSources();
                 conversationArchiveStore.completeExchange(
                     taskInfo.conversationId(),
                     taskInfo.exchangeId(),
@@ -870,7 +952,7 @@ public class BusinessChatService {
                     System.currentTimeMillis() - taskInfo.startTime()
                 );
                 if (taskInfo.traceRecorder() != null) {
-                    Map<String, Object> finalizeSnapshot = sourceSnapshotTrace(sourceSnapshot);
+                    Map<String, Object> finalizeSnapshot = sourceSnapshotTrace(binding);
                     finalizeSnapshot.put("finalStatus", ChatTurnStatus.FAILED.name());
                     finalizeSnapshot.put("errorMessage", errorMessage);
                     finalizeSnapshot.put("answerLength", taskInfo.answerBuffer().length());
@@ -931,7 +1013,7 @@ public class BusinessChatService {
 
         releaseLeaseQuietly(taskInfo.leaseKey(), taskInfo.leaseOwnerToken());
 
-        chatRuntimeRegistry.remove(taskInfo.conversationId(), taskInfo);
+        chatRuntimeRegistry.remove(taskInfo.tenantId(), taskInfo.conversationId(), taskInfo);
     }
 
     private List<SearchReference> deduplicateReferences(List<SearchReference> references) {
@@ -958,7 +1040,7 @@ public class BusinessChatService {
         return sourceSnapshot;
     }
 
-    private List<SearchReference> bindTerminalSourceSnapshot(TaskInfo taskInfo) {
+    private ExplicitCitationBindingResult bindTerminalSourceSnapshot(TaskInfo taskInfo) {
         return explicitCitationBindingService.bind(
             taskInfo.answerBuffer().toString(),
             taskInfo.promptAssemblyResult(),
@@ -983,21 +1065,35 @@ public class BusinessChatService {
         }
     }
 
-    private void assertSourceSnapshotWithinRenderedSources(TaskInfo taskInfo,
-                                                           List<SearchReference> sourceSnapshot) {
+    private void assertRetrievedMatchesRenderedSources(TaskInfo taskInfo,
+                                                       ExplicitCitationBindingResult binding) {
         RagPromptAssemblyResult promptAssemblyResult = taskInfo.promptAssemblyResult();
         if (promptAssemblyResult == null) {
             return;
         }
-        Set<String> renderedSourceIdentities = Set.copyOf(promptAssemblyResult.getRenderedSourceIdentities());
-        List<String> unexpectedIdentities = sourceSnapshotIdentities(sourceSnapshot).stream()
-            .filter(identity -> !renderedSourceIdentities.contains(identity))
-            .toList();
-        if (!unexpectedIdentities.isEmpty()) {
+        if (!binding.retrievedSourceIdentities().equals(promptAssemblyResult.getRenderedSourceIdentities())) {
             throw new IllegalStateException(
-                "source snapshot contains identities outside Prompt rendered sources: " + unexpectedIdentities
+                "retrieved sources must equal Prompt rendered source identities"
             );
         }
+        Set<String> retrievedIdentities = Set.copyOf(binding.retrievedSourceIdentities());
+        List<String> unexpectedExplicit = binding.explicitCitationIdentities().stream()
+            .filter(identity -> !retrievedIdentities.contains(identity))
+            .toList();
+        if (!unexpectedExplicit.isEmpty()) {
+            throw new IllegalStateException(
+                "explicit citations contain identities outside retrieved sources: " + unexpectedExplicit
+            );
+        }
+        if (!binding.sourceSnapshotIdentities().equals(binding.explicitCitationIdentities())) {
+            throw new IllegalStateException("sourceSnapshotIdentities must equal explicitCitationIdentities");
+        }
+    }
+
+    private Map<String, Object> sourceSnapshotTrace(ExplicitCitationBindingResult binding) {
+        Map<String, Object> snapshot = binding.finalizeIdentitySnapshot();
+        snapshot.put("sourceSnapshotVisibility", SOURCE_SNAPSHOT_VISIBILITY);
+        return snapshot;
     }
 
     private Map<String, Object> sourceSnapshotTrace(List<SearchReference> sourceSnapshot) {
@@ -1005,6 +1101,9 @@ public class BusinessChatService {
         snapshot.put("sourceSnapshotVisibility", SOURCE_SNAPSHOT_VISIBILITY);
         snapshot.put("sourceSnapshotReferenceCount", sourceSnapshot == null ? 0 : sourceSnapshot.size());
         snapshot.put("sourceSnapshotIdentities", sourceSnapshotIdentities(sourceSnapshot));
+        snapshot.put("retrievedSourceIdentities", List.of());
+        snapshot.put("explicitCitationIdentities", List.of());
+        snapshot.put("retrievedSourceReferenceCount", 0);
         return snapshot;
     }
 
@@ -1157,7 +1256,11 @@ public class BusinessChatService {
         if (sessionView == null || sessionView.getExchanges() == null || sessionView.getExchanges().isEmpty()) {
             return sessionView;
         }
-        Optional<TaskInfo> runtimeOptional = chatRuntimeRegistry.get(sessionView.getConversationId());
+        Long tenantId = TenantContext.get();
+        if (tenantId == null || tenantId <= 0) {
+            return sessionView;
+        }
+        Optional<TaskInfo> runtimeOptional = chatRuntimeRegistry.get(tenantId, sessionView.getConversationId());
         if (runtimeOptional.isEmpty()) {
             return sessionView;
         }
@@ -1489,11 +1592,6 @@ public class BusinessChatService {
         }
     }
 
-    private String buildChatLeaseKey(String conversationId) {
-
-        return CHAT_RUNNING_LEASE_PREFIX + conversationId;
-    }
-
     private Long toNullable(long value) {
 
         return value > 0 ? value : null;
@@ -1505,15 +1603,6 @@ public class BusinessChatService {
         }
 
         return question.trim();
-    }
-
-    private String normalizeConversationId(String conversationId) {
-        if (StrUtil.isNotBlank(conversationId)) {
-
-            return conversationId.trim();
-        }
-
-        return UUID.randomUUID().toString().replace("-", "");
     }
 
     private String buildAgentQuestion(ConversationExecutionPlan executionPlan) {
@@ -1576,8 +1665,18 @@ public class BusinessChatService {
         return retrievalObserveStore.listResults(conversationId, exchangeId);
     }
 
+    public List<RetrievalResultView> getObservableRetrievalResults(String conversationId, long exchangeId) {
+        conversationAccessGuard.requireVisibleInTenant(conversationId);
+        return retrievalObserveStore.listResults(conversationId, exchangeId);
+    }
+
     public List<ChannelExecutionView> getChannelExecutions(String conversationId, long exchangeId) {
         conversationAccessGuard.requireOwned(conversationId);
+        return retrievalObserveStore.listChannelExecutions(conversationId, exchangeId);
+    }
+
+    public List<ChannelExecutionView> getObservableChannelExecutions(String conversationId, long exchangeId) {
+        conversationAccessGuard.requireVisibleInTenant(conversationId);
         return retrievalObserveStore.listChannelExecutions(conversationId, exchangeId);
     }
 

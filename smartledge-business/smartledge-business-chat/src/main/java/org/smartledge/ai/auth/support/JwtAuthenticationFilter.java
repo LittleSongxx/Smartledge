@@ -11,6 +11,7 @@ import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -37,8 +38,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtTokenService jwtTokenService;
 
-    public JwtAuthenticationFilter(JwtTokenService jwtTokenService) {
+    private final ObjectProvider<AuthSessionValidator> authSessionValidator;
+
+    public JwtAuthenticationFilter(JwtTokenService jwtTokenService,
+                                   ObjectProvider<AuthSessionValidator> authSessionValidator) {
         this.jwtTokenService = jwtTokenService;
+        this.authSessionValidator = authSessionValidator;
     }
 
     @Override
@@ -52,6 +57,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
         try {
             AuthenticatedPrincipal principal = jwtTokenService.parseToken(token);
+            AuthSessionValidator validator = authSessionValidator == null ? null : authSessionValidator.getIfAvailable();
+            if (validator != null) {
+                validator.validate(principal);
+            }
             UsernamePasswordAuthenticationToken authentication =
                 new UsernamePasswordAuthenticationToken(principal, null, authorities(principal));
             authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
@@ -80,6 +89,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         if (StrUtil.startWithIgnoreCase(authorization, BEARER_PREFIX)) {
             return StrUtil.trim(authorization.substring(BEARER_PREFIX.length()));
         }
-        return StrUtil.trim(authorization);
+        return null;
     }
 }

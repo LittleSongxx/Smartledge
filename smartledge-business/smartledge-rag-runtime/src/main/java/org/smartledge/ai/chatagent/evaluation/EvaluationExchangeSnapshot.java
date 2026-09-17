@@ -189,8 +189,21 @@ public record EvaluationExchangeSnapshot(
     public record Archive(
         String terminalStatus,
         String terminalReason,
-        List<String> sourceSnapshotIdentities
+        List<String> sourceSnapshotIdentities,
+        @JsonInclude(JsonInclude.Include.NON_EMPTY) List<String> retrievedSourceIdentities,
+        @JsonInclude(JsonInclude.Include.NON_EMPTY) List<String> explicitCitationIdentities
     ) {
+        public Archive(String terminalStatus,
+                       String terminalReason,
+                       List<String> sourceSnapshotIdentities) {
+            this(
+                terminalStatus,
+                terminalReason,
+                sourceSnapshotIdentities,
+                List.of(),
+                sourceSnapshotIdentities == null ? List.of() : sourceSnapshotIdentities
+            );
+        }
     }
 
     public record Conservation(
@@ -201,8 +214,33 @@ public record EvaluationExchangeSnapshot(
         List<String> finalizeSourceSnapshotIdentities,
         List<String> observedSelectedSourceIdentities,
         String status,
-        List<String> reasons
+        List<String> reasons,
+        @JsonInclude(JsonInclude.Include.NON_EMPTY) List<String> retrievedSourceIdentities,
+        @JsonInclude(JsonInclude.Include.NON_EMPTY) List<String> archiveRetrievedSourceIdentities,
+        @JsonInclude(JsonInclude.Include.NON_EMPTY) List<String> finalizeRetrievedSourceIdentities
     ) {
+        public Conservation(List<String> promptEligibleIdentities,
+                            List<String> boundCitationIdentities,
+                            List<String> citationSourceSnapshotIdentities,
+                            List<String> archiveSourceSnapshotIdentities,
+                            List<String> finalizeSourceSnapshotIdentities,
+                            List<String> observedSelectedSourceIdentities,
+                            String status,
+                            List<String> reasons) {
+            this(
+                promptEligibleIdentities,
+                boundCitationIdentities,
+                citationSourceSnapshotIdentities,
+                archiveSourceSnapshotIdentities,
+                finalizeSourceSnapshotIdentities,
+                observedSelectedSourceIdentities,
+                status,
+                reasons,
+                List.of(),
+                List.of(),
+                List.of()
+            );
+        }
     }
 
     public record Provenance(

@@ -18,6 +18,54 @@ export function createLatestRequestGuard() {
   }
 }
 
+export function createNonOverlappingInterval(task, intervalMs, options = {}) {
+  let timer = null
+  let inFlight = false
+  let consecutiveErrors = 0
+  const maxConsecutiveErrors = options.maxConsecutiveErrors ?? Number.POSITIVE_INFINITY
+
+  function clear() {
+    if (timer != null) {
+      window.clearInterval(timer)
+      timer = null
+    }
+  }
+
+  function start() {
+    clear()
+    consecutiveErrors = 0
+    timer = window.setInterval(async () => {
+      if (inFlight) return
+      inFlight = true
+      try {
+        const shouldStop = await task()
+        consecutiveErrors = 0
+        if (shouldStop) {
+          clear()
+          options.onStopped?.()
+        }
+      } catch (error) {
+        consecutiveErrors += 1
+        options.onError?.(error, consecutiveErrors)
+        if (consecutiveErrors >= maxConsecutiveErrors) {
+          clear()
+          options.onStopped?.()
+        }
+      } finally {
+        inFlight = false
+      }
+    }, intervalMs)
+  }
+
+  return {
+    start,
+    clear,
+    isActive() {
+      return timer != null
+    }
+  }
+}
+
 export function computeDocumentSummary(data = {}) {
   const records = Array.isArray(data?.records) ? data.records : []
   const total = Number(data?.total || records.length || 0)

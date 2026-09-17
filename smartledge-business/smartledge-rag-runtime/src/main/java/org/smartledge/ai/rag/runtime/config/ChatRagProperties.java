@@ -98,6 +98,10 @@ public class ChatRagProperties {
 
     private HistorySummaryProperties historySummary = new HistorySummaryProperties();
 
+    private AgentKnowledgeProperties agentKnowledge = new AgentKnowledgeProperties();
+
+    private LongTermMemoryProperties longTermMemory = new LongTermMemoryProperties();
+
     public boolean isEnabled() { return managed().enabled; }
     public boolean isRewriteEnabled() { return managed().rewriteEnabled; }
     public int getRewriteHistoryTurns() { return managed().rewriteHistoryTurns; }
@@ -135,6 +139,14 @@ public class ChatRagProperties {
     public boolean isRerankEnabled() { return managed().rerankEnabled; }
     public String getNoEvidenceReply() { return managed().noEvidenceReply; }
     public HistorySummaryProperties getHistorySummary() { return managed().historySummary; }
+    public AgentKnowledgeProperties getAgentKnowledge() {
+        AgentKnowledgeProperties value = managed().agentKnowledge;
+        return value == null ? new AgentKnowledgeProperties() : value;
+    }
+    public LongTermMemoryProperties getLongTermMemory() {
+        LongTermMemoryProperties value = managed().longTermMemory;
+        return value == null ? new LongTermMemoryProperties() : value;
+    }
 
     private ChatRagProperties managed() {
         if (runtimeConfigProvider == null) {
@@ -142,6 +154,22 @@ public class ChatRagProperties {
         }
         ChatRagProperties managed = runtimeConfigProvider.currentRag();
         return managed == null || managed == this ? this : managed;
+    }
+
+    @Data
+    public static class AgentKnowledgeProperties {
+
+        private int topK = 6;
+
+        private long timeoutMs = 15000L;
+    }
+
+    @Data
+    public static class LongTermMemoryProperties {
+
+        private int maxFacts = 12;
+
+        private int maxFactChars = 240;
     }
 
     @Data
@@ -197,6 +225,7 @@ public class ChatRagProperties {
 
         private double rankWeight = 1.0D;
 
+        /** 仅观测/兼容配置，不参与加权 RRF。 */
         private double originalScoreWeight = 0.08D;
 
         private double metadataBoostWeight = 0.04D;

@@ -318,5 +318,14 @@ class UserAuthServiceImplTest {
         public void recordSuccessfulLogin(Long tenantId, Long userId, Instant loginAt) {
             successfulLogins.add(tenantId + ":" + userId);
         }
+
+        @Override
+        public Optional<SessionAccount> findSessionAccount(Long tenantId, Long userId) {
+            return Optional.empty();
+        }
+
+        @Override
+        public void incrementTokenVersion(Long tenantId, Long userId) {
+        }
     }
 }

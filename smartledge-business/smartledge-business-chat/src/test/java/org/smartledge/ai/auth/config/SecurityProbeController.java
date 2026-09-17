@@ -19,6 +19,11 @@ class SecurityProbeController {
         return ApiResponse.ok("chat-ok");
     }
 
+    @PostMapping("/api/auth/me")
+    public ApiResponse<String> me() {
+        return ApiResponse.ok("me-ok");
+    }
+
     @PostMapping("/manage/probe")
     @RequiresPermission("observe:read")
     public ApiResponse<String> manage() {

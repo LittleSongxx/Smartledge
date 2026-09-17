@@ -222,7 +222,8 @@ VALUES
     (10, 'config:read',        '查看参数配置',    'system',      '查看系统参数与历史', NOW(), NOW(), 1),
     (11, 'config:write',       '修改参数配置',    'system',      '修改并恢复系统参数', NOW(), NOW(), 1),
     (12, 'user:manage',        '管理用户与角色',  'system',      '管理租户内的用户与角色', NOW(), NOW(), 1),
-    (13, 'tenant:manage',      '管理租户',        'system',      '跨租户管理能力', NOW(), NOW(), 1);
+    (13, 'tenant:manage',      '管理租户',        'system',      '跨租户管理能力，仅留给未来平台身份，不授给租户角色', NOW(), NOW(), 1),
+    (16, 'document:read-all',  '查看租户全部文档','document',    '查看租户资产全集，不按文档 ACL 收窄', NOW(), NOW(), 1);
 
 INSERT IGNORE INTO smartledge_role (id, tenant_id, role_code, role_name, description, built_in, create_time, edit_time, status)
 VALUES
@@ -232,16 +233,17 @@ VALUES
     (4, 2, 'ADMIN',   '租户管理员', '租户内全部权限', 1, NOW(), NOW(), 1),
     (5, 2, 'USER',    '普通用户',   '仅可提问与查看自己有权限的文档', 1, NOW(), NOW(), 1);
 
--- ADMIN 角色拿全部权限；CURATOR 拿除用户/租户管理外的全部；USER 只拿对话与文档查看
+-- ADMIN 拿租户内全部权限，但不含 tenant:manage（该码留给未来平台身份）。
 INSERT IGNORE INTO smartledge_role_permission (id, tenant_id, role_id, permission_id, create_time, edit_time, status)
 SELECT 1000 + r.id * 100 + p.id, r.tenant_id, r.id, p.id, NOW(), NOW(), 1
   FROM smartledge_role r CROSS JOIN smartledge_permission p
- WHERE r.role_code = 'ADMIN';
+ WHERE r.role_code = 'ADMIN'
+   AND p.permission_code <> 'tenant:manage';
 
 INSERT IGNORE INTO smartledge_role_permission (id, tenant_id, role_id, permission_id, create_time, edit_time, status)
 SELECT 2000 + r.id * 100 + p.id, r.tenant_id, r.id, p.id, NOW(), NOW(), 1
   FROM smartledge_role r JOIN smartledge_permission p
-    ON p.permission_code IN ('kb:read','kb:write','document:read','document:upload','document:delete',
+    ON p.permission_code IN ('kb:read','kb:write','document:read','document:read-all','document:upload','document:delete',
                              'document:acl:manage','chat:use','observe:read','config:read')
  WHERE r.role_code = 'CURATOR';
 
@@ -266,12 +268,28 @@ VALUES (1, 1, 1, 1, NOW(), NOW(), 1),
        (3, 1, 3, 3, NOW(), NOW(), 1),
        (4, 2, 4, 5, NOW(), NOW(), 1);
 
--- 存量文档授权给默认租户的 ADMIN 与 CURATOR 角色；
+-- 存量文档授权给**本租户** ADMIN / CURATOR 角色；主键由 document_id + 角色码派生，禁止常量主键。
 -- alice（USER）故意不授权，用于验证"同一租户内未授权即不可见"。
 INSERT IGNORE INTO smartledge_document_acl (id, tenant_id, document_id, principal_type, principal_id, permission, create_time, edit_time, status)
-SELECT 9000000000000000001, d.tenant_id, d.id, 'ROLE', 1, 'MANAGE', NOW(), NOW(), 1
-  FROM smartledge_document d WHERE d.status = 1;
+SELECT CONV(SUBSTRING(MD5(CONCAT('s21-acl-', d.id, '-ADMIN')), 1, 15), 16, 10),
+       d.tenant_id, d.id, 'ROLE', admin_role.id, 'MANAGE', NOW(), NOW(), 1
+  FROM smartledge_document d
+  JOIN (
+        SELECT tenant_id, MIN(id) AS id
+          FROM smartledge_role
+         WHERE role_code = 'ADMIN' AND status = 1
+         GROUP BY tenant_id
+  ) admin_role ON admin_role.tenant_id = d.tenant_id
+ WHERE d.status = 1;
 
 INSERT IGNORE INTO smartledge_document_acl (id, tenant_id, document_id, principal_type, principal_id, permission, create_time, edit_time, status)
-SELECT 9000000000000000002, d.tenant_id, d.id, 'ROLE', 2, 'READ', NOW(), NOW(), 1
-  FROM smartledge_document d WHERE d.status = 1;
+SELECT CONV(SUBSTRING(MD5(CONCAT('s21-acl-', d.id, '-CURATOR')), 1, 15), 16, 10),
+       d.tenant_id, d.id, 'ROLE', curator_role.id, 'WRITE', NOW(), NOW(), 1
+  FROM smartledge_document d
+  JOIN (
+        SELECT tenant_id, MIN(id) AS id
+          FROM smartledge_role
+         WHERE role_code = 'CURATOR' AND status = 1
+         GROUP BY tenant_id
+  ) curator_role ON curator_role.tenant_id = d.tenant_id
+ WHERE d.status = 1;

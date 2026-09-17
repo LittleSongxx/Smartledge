@@ -28,12 +28,12 @@ public class ExplicitCitationBindingService {
 
     private static final Pattern EXPLICIT_REFERENCE_TOKEN = Pattern.compile(TOKEN_PATTERN);
 
-    private static final String SCHEMA_VERSION = "S02_EXPLICIT_CITATION_BINDING_V1";
+    private static final String SCHEMA_VERSION = "S25_RETRIEVED_AND_EXPLICIT_CITATION_V1";
 
-    public List<SearchReference> bind(String answer,
-                                      RagPromptAssemblyResult promptAssemblyResult,
-                                      ConversationTraceRecorder traceRecorder,
-                                      String executionMode) {
+    public ExplicitCitationBindingResult bind(String answer,
+                                              RagPromptAssemblyResult promptAssemblyResult,
+                                              ConversationTraceRecorder traceRecorder,
+                                              String executionMode) {
         ConversationTraceRecorder.StageHandle stage = traceRecorder == null
             ? null
             : traceRecorder.startStage(
@@ -67,15 +67,18 @@ public class ExplicitCitationBindingService {
                 bindings.add(bindingTrace(token, resolution, firstOccurrence));
             }
 
-            List<SearchReference> sourceSnapshot = List.copyOf(finalReferences.values());
+            List<SearchReference> explicitCitations = List.copyOf(finalReferences.values());
             List<String> explicitCitationIdentities = List.copyOf(finalReferences.keySet());
-            List<String> sourceSnapshotIdentities = sourceSnapshot.stream()
-                .map(SearchReference::uniqueKey)
-                .toList();
-            Set<String> renderedSourceIdentitySet = Set.copyOf(domain.renderedSourceIdentities());
-            boolean withinRenderedSources = renderedSourceIdentitySet.containsAll(explicitCitationIdentities);
+            List<SearchReference> retrievedSources = domain.retrievedSources();
+            List<String> retrievedSourceIdentities = domain.renderedSourceIdentities();
+            List<String> sourceSnapshotIdentities = explicitCitationIdentities;
+            Set<String> retrievedIdentitySet = Set.copyOf(retrievedSourceIdentities);
+            boolean retrievedMatchesRendered = retrievedSourceIdentities.equals(
+                retrievedSources.stream().map(SearchReference::uniqueKey).toList()
+            );
+            boolean explicitWithinRetrieved = retrievedIdentitySet.containsAll(explicitCitationIdentities);
             boolean snapshotMatchesExplicitCitations = sourceSnapshotIdentities.equals(explicitCitationIdentities);
-            if (!withinRenderedSources || !snapshotMatchesExplicitCitations) {
+            if (!retrievedMatchesRendered || !explicitWithinRetrieved || !snapshotMatchesExplicitCitations) {
                 throw new IllegalStateException("explicit citation binding conservation failed");
             }
 
@@ -90,10 +93,13 @@ public class ExplicitCitationBindingService {
             snapshot.put("rejectedTokenCount", rejectedTokens.size());
             snapshot.put("rejectedTokens", rejectedTokens);
             snapshot.put("renderedSourceIdentities", domain.renderedSourceIdentities());
+            snapshot.put("retrievedSourceIdentities", retrievedSourceIdentities);
             snapshot.put("explicitCitationIdentities", explicitCitationIdentities);
             snapshot.put("sourceSnapshotIdentities", sourceSnapshotIdentities);
-            snapshot.put("sourceSnapshotReferenceCount", sourceSnapshot.size());
-            snapshot.put("explicitCitationsWithinRenderedSources", withinRenderedSources);
+            snapshot.put("retrievedSourceReferenceCount", retrievedSources.size());
+            snapshot.put("sourceSnapshotReferenceCount", explicitCitations.size());
+            snapshot.put("explicitCitationsWithinRetrievedSources", explicitWithinRetrieved);
+            snapshot.put("retrievedEqualsRenderedSources", retrievedMatchesRendered);
             snapshot.put("sourceSnapshotEqualsExplicitCitations", snapshotMatchesExplicitCitations);
             snapshot.put("conservationStatus", "CONSERVED");
 
@@ -101,13 +107,19 @@ public class ExplicitCitationBindingService {
                 traceRecorder.completeStage(stage, "显式引用绑定完成。", snapshot);
             }
             log.info(
-                "显式引用绑定完成: parsedTokenCount={}, bindingCount={}, rejectedTokenCount={}, sourceSnapshotReferenceCount={}",
+                "显式引用绑定完成: parsedTokenCount={}, bindingCount={}, rejectedTokenCount={}, retrievedSourceReferenceCount={}, explicitCitationCount={}",
                 parsedTokens.size(),
                 bindings.size(),
                 rejectedTokens.size(),
-                sourceSnapshot.size()
+                retrievedSources.size(),
+                explicitCitations.size()
             );
-            return sourceSnapshot;
+            return new ExplicitCitationBindingResult(
+                retrievedSources,
+                explicitCitations,
+                retrievedSourceIdentities,
+                explicitCitationIdentities
+            );
         }
         catch (RuntimeException exception) {
             if (traceRecorder != null) {
@@ -274,6 +286,17 @@ public class ExplicitCitationBindingService {
 
         private List<String> renderedSourceIdentities() {
             return renderedSourceIdentities;
+        }
+
+        private List<SearchReference> retrievedSources() {
+            List<SearchReference> sources = new ArrayList<>();
+            for (String identity : renderedSourceIdentities) {
+                SearchReference reference = renderedSourcesByIdentity.get(identity);
+                if (reference != null) {
+                    sources.add(reference);
+                }
+            }
+            return List.copyOf(sources);
         }
 
         private static boolean isRenderedSource(PromptReferenceDecision decision) {

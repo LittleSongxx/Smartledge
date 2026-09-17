@@ -232,9 +232,19 @@ public class DocumentManageServiceImpl implements DocumentManageService {
         }
 
         byte[] fileBytes = getFileBytes(file);
+        String contentHash = cn.hutool.crypto.digest.DigestUtil.sha256Hex(fileBytes);
         Long documentId = uidGenerator.getUid();
         Long knowledgeBaseId = parseRequiredLong(dto.getKnowledgeBaseId(), "knowledgeBaseId");
         SuperAgentKnowledgeBase knowledgeBase = knowledgeBaseManageService.requireEnabled(knowledgeBaseId);
+        SuperAgentDocument duplicate = documentMapper.selectOne(new LambdaQueryWrapper<SuperAgentDocument>()
+            .eq(SuperAgentDocument::getKnowledgeBaseId, knowledgeBaseId)
+            .eq(SuperAgentDocument::getContentHash, contentHash)
+            .eq(SuperAgentDocument::getStatus, BusinessStatus.YES.getCode())
+            .last("LIMIT 1"));
+        if (duplicate != null) {
+            throw new SuperAgentFrameException(DocumentManageCode.DUPLICATE_CONTENT_HASH.getCode(),
+                DocumentManageCode.DUPLICATE_CONTENT_HASH.getMsg());
+        }
         String documentMetadataJson = null;
         if (StrUtil.isNotBlank(dto.getMetadataJson())) {
             try {
@@ -269,6 +279,8 @@ public class DocumentManageServiceImpl implements DocumentManageService {
         document.setKnowledgeBaseId(knowledgeBase.getId());
         document.setKnowledgeBaseName(knowledgeBase.getBaseName());
         document.setMetadataJson(documentMetadataJson);
+        document.setContentHash(contentHash);
+        document.setSourceUri(storedObjectInfo.getObjectUrl());
         document.setStatus(BusinessStatus.YES.getCode());
 
         Long taskId = uidGenerator.getUid();
@@ -278,7 +290,7 @@ public class DocumentManageServiceImpl implements DocumentManageService {
         task.setTaskType(DocumentTaskTypeEnum.PARSE_ROUTE.getCode());
         task.setTaskStatus(DocumentTaskStatusEnum.NEW.getCode());
         task.setCurrentStage(DocumentTaskStageEnum.FILE_UPLOAD.getCode());
-        Long operatorId = parseOptionalLong(dto.getOperatorId());
+        Long operatorId = currentOperatorId();
         task.setTriggerSource(resolveTriggerSource(operatorId));
         task.setRetryCount(0);
         task.setStatus(BusinessStatus.YES.getCode());
@@ -334,6 +346,32 @@ public class DocumentManageServiceImpl implements DocumentManageService {
         }
     }
 
+    /**
+     * 文档读路径：持 {@code document:read-all} 看租户全集；仅 {@code document:read} 按 ACL 收窄。
+     */
+    private void requireDocumentRead(Long documentId) {
+        org.smartledge.database.tenant.RequestIdentity identity = requireDocumentOperator();
+        if (documentId == null) {
+            throw new SuperAgentFrameException(BaseCode.PARAMETER_ERROR.getCode(), "文档id不能为空。");
+        }
+        if (identity.hasPermission("document:read-all")) {
+            return;
+        }
+        if (!documentAclStore.visibleDocumentIds(java.util.List.of(documentId), identity).contains(documentId)) {
+            throw new org.smartledge.ai.auth.support.AuthFailureException(403, "当前账号没有查看该文档的权限");
+        }
+    }
+
+    private boolean hasDocumentReadAll(org.smartledge.database.tenant.RequestIdentity identity) {
+        return identity != null && identity.hasPermission("document:read-all");
+    }
+
+    private Long currentOperatorId() {
+        org.smartledge.database.tenant.RequestIdentity identity =
+            org.smartledge.database.tenant.TenantContext.getIdentity();
+        return identity == null ? null : identity.userId();
+    }
+
     private org.smartledge.database.tenant.RequestIdentity requireDocumentOperator() {
         org.smartledge.database.tenant.RequestIdentity identity =
             org.smartledge.database.tenant.TenantContext.getIdentity();
@@ -345,6 +383,7 @@ public class DocumentManageServiceImpl implements DocumentManageService {
 
     @Override
     public DocumentPageQueryVo queryDocumentPage(DocumentPageQueryDto dto) {
+        org.smartledge.database.tenant.RequestIdentity identity = requireDocumentOperator();
 
         int pageNo = dto.getPageNo() == null || dto.getPageNo() <= 0 ? 1 : dto.getPageNo();
         int pageSize = dto.getPageSize() == null || dto.getPageSize() <= 0 ? 10 : dto.getPageSize();
@@ -354,6 +393,14 @@ public class DocumentManageServiceImpl implements DocumentManageService {
         LambdaQueryWrapper<SuperAgentDocument> wrapper = new LambdaQueryWrapper<SuperAgentDocument>()
             .eq(SuperAgentDocument::getStatus, BusinessStatus.YES.getCode())
             .orderByDesc(SuperAgentDocument::getEditTime, SuperAgentDocument::getId);
+
+        if (!hasDocumentReadAll(identity)) {
+            Set<Long> visible = documentAclStore.visibleDocumentIdsForIdentity(identity);
+            if (visible.isEmpty()) {
+                return new DocumentPageQueryVo(pageNo, pageSize, 0L, List.of());
+            }
+            wrapper.in(SuperAgentDocument::getId, visible);
+        }
 
         if (keyword != null) {
             wrapper.and(query -> query.like(SuperAgentDocument::getDocumentName, keyword)
@@ -368,6 +415,17 @@ public class DocumentManageServiceImpl implements DocumentManageService {
         List<DocumentListItemVo> records = documentList.stream()
             .map(document -> toDocumentListItemVo(document, latestTaskMap.get(document.getId())))
             .toList();
+        Set<Long> manageableIds = documentAclStore.manageableDocumentIds(
+            records.stream().map(DocumentListItemVo::getDocumentId).toList(), identity);
+        Set<Long> askableIds = documentAclStore.visibleDocumentIds(
+            records.stream().map(DocumentListItemVo::getDocumentId).toList(), identity);
+        boolean readAll = hasDocumentReadAll(identity);
+        for (DocumentListItemVo item : records) {
+            item.setCanManageAcl(manageableIds.contains(item.getDocumentId()));
+            boolean askable = askableIds.contains(item.getDocumentId());
+            item.setConversationAskable(askable);
+            item.setVisibleButNotAskable(readAll && !askable);
+        }
 
         return new DocumentPageQueryVo(pageNo, pageSize, resultPage.getTotal(), records);
     }
@@ -375,6 +433,7 @@ public class DocumentManageServiceImpl implements DocumentManageService {
     @Override
     public DocumentListItemVo queryDocumentDetail(DocumentDetailQueryDto dto) {
         SuperAgentDocument document = getDocumentOrThrow(dto.getDocumentId());
+        requireDocumentRead(document.getId());
         SuperAgentDocumentTask latestTask = getLatestTask(document.getId());
         return toDocumentListItemVo(document, latestTask);
     }
@@ -393,6 +452,14 @@ public class DocumentManageServiceImpl implements DocumentManageService {
         if (activeTaskCount > 0) {
             throw new SuperAgentFrameException(DocumentManageCode.DOCUMENT_STATUS_INVALID.getCode(),
                 "当前文档存在进行中的任务，请等待任务结束后再删除。");
+        }
+
+        document.setStatus(BusinessStatus.NO.getCode());
+        documentMapper.updateById(document);
+        vectorGateway.tombstoneByDocumentId(documentId);
+        DocumentKeywordSearchGateway tombstoneKeyword = keywordSearchGatewayProvider.getIfAvailable();
+        if (tombstoneKeyword != null) {
+            tombstoneKeyword.tombstoneByDocumentId(documentId);
         }
 
         List<String> objectNames = new ArrayList<>();
@@ -443,6 +510,7 @@ public class DocumentManageServiceImpl implements DocumentManageService {
             .eq(SuperAgentDocumentTask::getDocumentId, documentId));
         planMapper.delete(new LambdaQueryWrapper<SuperAgentDocumentStrategyPlan>()
             .eq(SuperAgentDocumentStrategyPlan::getDocumentId, documentId));
+        documentAclStore.revokeAllForDocument(documentId, requireDocumentOperator());
         documentMapper.deleteById(documentId);
 
         return new DocumentDeleteVo(documentId, document.getDocumentName());
@@ -452,6 +520,7 @@ public class DocumentManageServiceImpl implements DocumentManageService {
     public DocumentStrategyPlanQueryVo queryStrategyPlan(DocumentStrategyPlanQueryDto dto) {
 
         SuperAgentDocument document = getDocumentOrThrow(dto.getDocumentId());
+        requireDocumentRead(document.getId());
         DocumentStrategyPlanVo planVo = null;
         boolean planReady = false;
 
@@ -573,7 +642,7 @@ public class DocumentManageServiceImpl implements DocumentManageService {
             basePlan.setPlanStatus(DocumentPlanStatusEnum.CONFIRMED.getCode());
             basePlan.setPlanSource(basePlan.getPlanSource() == null ? DocumentPlanSourceEnum.SYSTEM_RECOMMEND.getCode() : basePlan.getPlanSource());
             basePlan.setAdjustNote(dto.getAdjustNote());
-            basePlan.setConfirmUserId(dto.getOperatorId());
+            basePlan.setConfirmUserId(currentOperatorId());
             basePlan.setConfirmTime(new Date());
             if (confirmedContract != null) { basePlan.setChunkingContractJson(confirmedContract.json(objectMapper)); }
             planMapper.updateById(basePlan);
@@ -589,6 +658,8 @@ public class DocumentManageServiceImpl implements DocumentManageService {
             Integer newPlanVersion = getNextPlanVersion(document.getId());
             SuperAgentDocumentStrategyPlan newPlan = new SuperAgentDocumentStrategyPlan();
             newPlan.setId(newPlanId);
+            newPlan.setTenantId(document.getTenantId() != null ? document.getTenantId()
+                : org.smartledge.database.tenant.TenantContext.get());
             newPlan.setDocumentId(document.getId());
             newPlan.setPlanVersion(newPlanVersion);
 
@@ -599,13 +670,14 @@ public class DocumentManageServiceImpl implements DocumentManageService {
             if (confirmedContract != null) { newPlan.setChunkingContractJson(confirmedContract.json(objectMapper)); }
             newPlan.setRecommendReason(basePlan.getRecommendReason());
             newPlan.setAdjustNote(dto.getAdjustNote());
-            newPlan.setConfirmUserId(dto.getOperatorId());
+            newPlan.setConfirmUserId(currentOperatorId());
             newPlan.setConfirmTime(new Date());
             newPlan.setStatus(BusinessStatus.YES.getCode());
             planMapper.insert(newPlan);
 
             for (SuperAgentDocumentStrategyStep step : normalizedStepList) {
                 step.setId(uidGenerator.getUid());
+                step.setTenantId(newPlan.getTenantId());
                 step.setPlanId(newPlanId);
                 step.setStatus(BusinessStatus.YES.getCode());
                 stepMapper.insert(step);
@@ -632,8 +704,8 @@ public class DocumentManageServiceImpl implements DocumentManageService {
                     DocumentTaskStageEnum.STRATEGY_CONFIRM.getCode(),
                     DocumentTaskEventTypeEnum.USER_ADJUST.getCode(),
                     DocumentLogLevelEnum.INFO.getCode(),
-                    resolveOperatorType(parseOptionalLong(dto.getOperatorId())),
-                    parseOptionalLong(dto.getOperatorId()),
+                    resolveOperatorType(currentOperatorId()),
+                    currentOperatorId(),
                     "用户调整了系统推荐策略。",
                     detail("parentStrategyTypes", normalizedParentTypeList,
                         "childStrategyTypes", normalizedChildTypeList,
@@ -644,8 +716,8 @@ public class DocumentManageServiceImpl implements DocumentManageService {
                 DocumentTaskStageEnum.STRATEGY_CONFIRM.getCode(),
                 DocumentTaskEventTypeEnum.USER_CONFIRM.getCode(),
                 DocumentLogLevelEnum.INFO.getCode(),
-                    resolveOperatorType(parseOptionalLong(dto.getOperatorId())),
-                    parseOptionalLong(dto.getOperatorId()),
+                    resolveOperatorType(currentOperatorId()),
+                    currentOperatorId(),
                     "用户已确认最终策略方案。",
                 Map.of("planId", targetPlanId,
                     "parentStrategyTypes", normalizedParentTypeList,
@@ -743,7 +815,7 @@ public class DocumentManageServiceImpl implements DocumentManageService {
         task.setTaskType(DocumentTaskTypeEnum.BUILD_INDEX.getCode());
         task.setTaskStatus(DocumentTaskStatusEnum.NEW.getCode());
         task.setCurrentStage(DocumentTaskStageEnum.CHUNK_EXECUTE.getCode());
-        Long operatorId = parseOptionalLong(dto.getOperatorId());
+        Long operatorId = currentOperatorId();
         task.setTriggerSource(resolveTriggerSource(operatorId));
         task.setStrategySnapshot(plan.getStrategySnapshot());
         task.setRetryCount(0);
@@ -788,6 +860,7 @@ public class DocumentManageServiceImpl implements DocumentManageService {
         if (task == null || !Objects.equals(task.getStatus(), BusinessStatus.YES.getCode())) {
             throw new SuperAgentFrameException(DocumentManageCode.DOCUMENT_NOT_FOUND.getCode(), "任务不存在。");
         }
+        requireDocumentRead(task.getDocumentId());
 
         int pageNo = dto.getPageNo() == null || dto.getPageNo() <= 0 ? 1 : dto.getPageNo();
         int pageSize = dto.getPageSize() == null || dto.getPageSize() <= 0 ? 20 : dto.getPageSize();
@@ -887,12 +960,16 @@ public class DocumentManageServiceImpl implements DocumentManageService {
 
     @Override
     public DocumentIndexBuildProgressVo queryIndexBuildProgress(DocumentIndexBuildProgressQueryDto dto) {
+        if (dto.getDocumentId() != null) {
+            requireDocumentRead(dto.getDocumentId());
+        }
         DocumentIndexBuildProgressVo cachedByTaskId = cachedBuildProgress(dto);
         if (cachedByTaskId != null) {
             return cachedByTaskId;
         }
 
         SuperAgentDocument document = getDocumentOrThrow(dto.getDocumentId());
+        requireDocumentRead(document.getId());
         SuperAgentDocumentTask task = dto.getTaskId() == null
             ? getLatestTask(document.getId(), DocumentTaskTypeEnum.BUILD_INDEX.getCode())
             : taskMapper.selectById(dto.getTaskId());
@@ -953,6 +1030,7 @@ public class DocumentManageServiceImpl implements DocumentManageService {
         }
 
         SuperAgentDocument document = getDocumentOrThrow(dto.getDocumentId());
+        requireDocumentRead(document.getId());
         SuperAgentDocumentTask task = dto.getTaskId() == null
             ? getLatestTask(document.getId(), DocumentTaskTypeEnum.PARSE_ROUTE.getCode())
             : taskMapper.selectById(dto.getTaskId());
@@ -986,6 +1064,7 @@ public class DocumentManageServiceImpl implements DocumentManageService {
     @Override
     public DocumentParseArtifactListVo queryParseArtifacts(DocumentParseArtifactQueryDto dto) {
         SuperAgentDocument document = getDocumentOrThrow(dto.getDocumentId());
+        requireDocumentRead(document.getId());
         Long effectiveTaskId = resolveParseArtifactTaskId(document, dto.getTaskId());
         if (effectiveTaskId == null) {
             return new DocumentParseArtifactListVo(document.getId(), null, List.of());
@@ -1003,6 +1082,7 @@ public class DocumentManageServiceImpl implements DocumentManageService {
     @Override
     public DocumentParseArtifactContentVo queryParseArtifactContent(DocumentParseArtifactContentQueryDto dto) {
         SuperAgentDocument document = getDocumentOrThrow(dto.getDocumentId());
+        requireDocumentRead(document.getId());
         SuperAgentDocumentParseArtifact artifact = getParseArtifactOrThrow(document, dto.getTaskId(), dto.getArtifactId());
         DocumentParseArtifactItemVo item = DocumentParseArtifactAssembler.toItem(artifact, getArtifactMetadata(artifact));
         if (item == null || !Boolean.TRUE.equals(item.getViewable())) {
@@ -1015,6 +1095,7 @@ public class DocumentManageServiceImpl implements DocumentManageService {
     @Override
     public DocumentParseArtifactDownloadVo downloadParseArtifact(DocumentParseArtifactContentQueryDto dto) {
         SuperAgentDocument document = getDocumentOrThrow(dto.getDocumentId());
+        requireDocumentRead(document.getId());
         SuperAgentDocumentParseArtifact artifact = getParseArtifactOrThrow(document, dto.getTaskId(), dto.getArtifactId());
         return DocumentParseArtifactAssembler.toDownload(artifact, storageService.downloadObject(artifact.getObjectName()));
     }
@@ -1022,6 +1103,7 @@ public class DocumentManageServiceImpl implements DocumentManageService {
     @Override
     public DocumentChunkQueryVo queryDocumentChunks(DocumentChunkQueryDto dto) {
         SuperAgentDocument document = getDocumentOrThrow(dto.getDocumentId());
+        requireDocumentRead(document.getId());
         int pageNo = dto.getPageNo() == null || dto.getPageNo() <= 0 ? 1 : dto.getPageNo();
         int pageSize = dto.getPageSize() == null || dto.getPageSize() <= 0 ? 20 : dto.getPageSize();
 
@@ -1070,6 +1152,7 @@ public class DocumentManageServiceImpl implements DocumentManageService {
     @Override
     public DocumentChunkDetailVo queryDocumentChunkDetail(DocumentChunkDetailQueryDto dto) {
         SuperAgentDocument document = getDocumentOrThrow(dto.getDocumentId());
+        requireDocumentRead(document.getId());
         Long effectiveTaskId = resolveChunkTaskId(document, dto.getTaskId());
         if (effectiveTaskId == null) {
             throw new SuperAgentFrameException(DocumentManageCode.DOCUMENT_NOT_FOUND.getCode(), "当前文档还没有可查看的 chunk 详情。");
@@ -1512,7 +1595,10 @@ public class DocumentManageServiceImpl implements DocumentManageService {
             latestTask == null ? null : latestTask.getTaskStatus(),
             latestTask == null ? "" : enumMsg(DocumentTaskStatusEnum.getRc(latestTask.getTaskStatus())),
             document.getCreateTime(),
-            document.getEditTime()
+            document.getEditTime(),
+            Boolean.FALSE,
+            Boolean.TRUE,
+            Boolean.FALSE
         );
     }
 

@@ -34,7 +34,7 @@ const dialogTitle = computed(() => {
 })
 const dialogDescription = computed(() => detailKind.value === 'route'
   ? '仅展示后端返回的检索范围、候选和状态事实。'
-  : '本轮回答中由后端显式绑定的来源详情。')
+  : '本轮检索到来源详情。答案里的 ASCII [n] 才是显式引用，不等于检索来源全集。')
 
 function routeTone(tone) {
   if (tone === 'success') return 'success'

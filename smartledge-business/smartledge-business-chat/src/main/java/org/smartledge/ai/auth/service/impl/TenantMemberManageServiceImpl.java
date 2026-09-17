@@ -18,6 +18,7 @@ import org.smartledge.ai.auth.mapper.AuthRoleMapper;
 import org.smartledge.ai.auth.mapper.AuthRolePermissionMapper;
 import org.smartledge.ai.auth.mapper.AuthUserAccountMapper;
 import org.smartledge.ai.auth.mapper.AuthUserRoleMapper;
+import org.smartledge.ai.auth.service.AuthAccountStore;
 import org.smartledge.ai.auth.service.TenantMemberManageService;
 import org.smartledge.ai.auth.support.AuthFailureException;
 import org.smartledge.ai.auth.support.PasswordVerifier;
@@ -86,13 +87,16 @@ public class TenantMemberManageServiceImpl implements TenantMemberManageService 
 
     private final UidGenerator uidGenerator;
 
+    private final AuthAccountStore authAccountStore;
+
     public TenantMemberManageServiceImpl(AuthUserAccountMapper userAccountMapper,
                                         AuthUserRoleMapper userRoleMapper,
                                         AuthRoleMapper roleMapper,
                                         AuthRolePermissionMapper rolePermissionMapper,
                                         AuthPermissionMapper permissionMapper,
                                         PasswordVerifier passwordVerifier,
-                                        UidGenerator uidGenerator) {
+                                        UidGenerator uidGenerator,
+                                        AuthAccountStore authAccountStore) {
         this.userAccountMapper = userAccountMapper;
         this.userRoleMapper = userRoleMapper;
         this.roleMapper = roleMapper;
@@ -100,6 +104,7 @@ public class TenantMemberManageServiceImpl implements TenantMemberManageService 
         this.permissionMapper = permissionMapper;
         this.passwordVerifier = passwordVerifier;
         this.uidGenerator = uidGenerator;
+        this.authAccountStore = authAccountStore;
     }
 
     @Override
@@ -155,6 +160,9 @@ public class TenantMemberManageServiceImpl implements TenantMemberManageService 
         }
         return TenantContext.callWith(identity.tenantId(), () -> {
             AuthUserAccount account = requireMember(identity.tenantId(), memberId);
+            if (status == DISABLED) {
+                assertNotLastEnabledAdmin(identity.tenantId(), memberId, "停用");
+            }
             userAccountMapper.update(null, new LambdaUpdateWrapper<AuthUserAccount>()
                 .eq(AuthUserAccount::getTenantId, identity.tenantId())
                 .eq(AuthUserAccount::getId, memberId)
@@ -164,6 +172,9 @@ public class TenantMemberManageServiceImpl implements TenantMemberManageService 
                 .set(status == DISABLED, AuthUserAccount::getFailedAttempts, 0));
             account.setStatus(status);
             account.setLockedUntil(null);
+            if (status == DISABLED) {
+                authAccountStore.incrementTokenVersion(identity.tenantId(), memberId);
+            }
             return toItem(account, enabledRolesOfUser(identity.tenantId(), memberId), new Date());
         });
     }
@@ -208,6 +219,7 @@ public class TenantMemberManageServiceImpl implements TenantMemberManageService 
         if (roleIds.isEmpty()) {
             throw new SuperAgentFrameException(BaseCode.PARAMETER_ERROR.getCode(), "请至少为该成员分配一个角色。");
         }
+        assertAssignableRoles(identity, roleIds);
         if (findByUsername(identity.tenantId(), username) != null) {
             throw new SuperAgentFrameException(BaseCode.PARAMETER_ERROR.getCode(), "该登录名已被使用。");
         }
@@ -238,12 +250,17 @@ public class TenantMemberManageServiceImpl implements TenantMemberManageService 
             throw new SuperAgentFrameException(BaseCode.PARAMETER_ERROR.getCode(), "请至少为该成员保留一个角色。");
         }
         boolean editingSelf = Objects.equals(identity.userId(), memberId);
+        List<Long> currentRoleIds = enabledRoleIdsOfUser(identity.tenantId(), memberId);
+        boolean rolesChanged = !new LinkedHashSet<>(currentRoleIds).equals(new LinkedHashSet<>(roleIds));
         if (editingSelf) {
             // 自锁防护：改自己的角色可能把自己降级到再也进不来管理端。
-            List<Long> currentRoleIds = enabledRoleIdsOfUser(identity.tenantId(), memberId);
-            if (!new LinkedHashSet<>(currentRoleIds).equals(new LinkedHashSet<>(roleIds))) {
+            if (rolesChanged) {
                 throw new SuperAgentFrameException(BaseCode.PARAMETER_ERROR.getCode(), "不能修改自己的角色。");
             }
+        }
+        assertAssignableRoles(identity, roleIds);
+        if (rolesChanged && removesLastEnabledAdmin(identity.tenantId(), memberId, roleIds)) {
+            throw new SuperAgentFrameException(BaseCode.PARAMETER_ERROR.getCode(), "不能降级租户内最后一名启用管理员。");
         }
         userAccountMapper.update(null, new LambdaUpdateWrapper<AuthUserAccount>()
             .eq(AuthUserAccount::getTenantId, identity.tenantId())
@@ -251,6 +268,9 @@ public class TenantMemberManageServiceImpl implements TenantMemberManageService 
             .set(AuthUserAccount::getDisplayName, displayName));
         account.setDisplayName(displayName);
         syncRoles(identity.tenantId(), memberId, roleIds);
+        if (rolesChanged) {
+            authAccountStore.incrementTokenVersion(identity.tenantId(), memberId);
+        }
         return toItem(account, rolesByIds(identity.tenantId(), roleIds), new Date());
     }
 
@@ -328,6 +348,92 @@ public class TenantMemberManageServiceImpl implements TenantMemberManageService 
             }
         }
         return distinct;
+    }
+
+    private void assertAssignableRoles(RequestIdentity actor, List<Long> roleIds) {
+        int actorRank = actorMaxRank(actor);
+        Set<Long> assignedIds = new LinkedHashSet<>(roleIds);
+        for (AuthRole role : rolesByIds(actor.tenantId(), roleIds)) {
+            if (!assignedIds.contains(role.getId())) {
+                continue;
+            }
+            if (roleRank(role.getRoleCode()) > actorRank) {
+                throw new SuperAgentFrameException(BaseCode.PARAMETER_ERROR.getCode(),
+                    "不能把成员提升到高于自己的角色。");
+            }
+        }
+    }
+
+    private int actorMaxRank(RequestIdentity actor) {
+        Set<Long> actorRoleIds = actor.roleIds();
+        return rolesByIds(actor.tenantId(), new ArrayList<>(actorRoleIds)).stream()
+            .filter(role -> actorRoleIds.contains(role.getId()))
+            .mapToInt(role -> roleRank(role.getRoleCode()))
+            .max()
+            .orElse(0);
+    }
+
+    private int roleRank(String roleCode) {
+        if ("ADMIN".equalsIgnoreCase(roleCode)) {
+            return 3;
+        }
+        if ("CURATOR".equalsIgnoreCase(roleCode)) {
+            return 2;
+        }
+        if ("USER".equalsIgnoreCase(roleCode)) {
+            return 1;
+        }
+        return 0;
+    }
+
+    private void assertNotLastEnabledAdmin(Long tenantId, Long userId, String action) {
+        if (hasEnabledAdminRole(tenantId, userId) && countEnabledAdmins(tenantId) <= 1) {
+            throw new SuperAgentFrameException(BaseCode.PARAMETER_ERROR.getCode(),
+                "不能" + action + "租户内最后一名启用管理员。");
+        }
+    }
+
+    private boolean removesLastEnabledAdmin(Long tenantId, Long userId, List<Long> remainingRoleIds) {
+        if (!hasEnabledAdminRole(tenantId, userId)) {
+            return false;
+        }
+        Set<Long> remaining = new LinkedHashSet<>(remainingRoleIds);
+        boolean stillAdmin = rolesByIds(tenantId, remainingRoleIds).stream()
+            .anyMatch(role -> "ADMIN".equalsIgnoreCase(role.getRoleCode()) && remaining.contains(role.getId()));
+        return !stillAdmin && countEnabledAdmins(tenantId) <= 1;
+    }
+
+    private boolean hasEnabledAdminRole(Long tenantId, Long userId) {
+        return enabledRolesOfUser(tenantId, userId).stream()
+            .anyMatch(role -> "ADMIN".equalsIgnoreCase(role.getRoleCode()));
+    }
+
+    private long countEnabledAdmins(Long tenantId) {
+        List<AuthRole> adminRoles = roleMapper.selectList(new LambdaQueryWrapper<AuthRole>()
+            .eq(AuthRole::getTenantId, tenantId)
+            .eq(AuthRole::getRoleCode, "ADMIN")
+            .eq(AuthRole::getStatus, ENABLED));
+        List<Long> adminRoleIds = adminRoles.stream().map(AuthRole::getId).filter(Objects::nonNull).toList();
+        if (adminRoleIds.isEmpty()) {
+            return 0;
+        }
+        List<Long> userIds = userRoleMapper.selectList(new LambdaQueryWrapper<AuthUserRole>()
+                .eq(AuthUserRole::getTenantId, tenantId)
+                .in(AuthUserRole::getRoleId, adminRoleIds)
+                .eq(AuthUserRole::getStatus, ENABLED))
+            .stream()
+            .map(AuthUserRole::getUserId)
+            .filter(Objects::nonNull)
+            .distinct()
+            .toList();
+        if (userIds.isEmpty()) {
+            return 0;
+        }
+        Long count = userAccountMapper.selectCount(new LambdaQueryWrapper<AuthUserAccount>()
+            .eq(AuthUserAccount::getTenantId, tenantId)
+            .in(AuthUserAccount::getId, userIds)
+            .eq(AuthUserAccount::getStatus, ENABLED));
+        return count == null ? 0 : count;
     }
 
     private AuthUserAccount requireMember(Long tenantId, Long memberId) {

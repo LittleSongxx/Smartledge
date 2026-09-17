@@ -187,6 +187,7 @@
             <td class="px-4 py-3 align-top text-body-sm tabular-nums text-foreground">{{ formatDateTime(item.editTime) }}</td>
             <td class="px-4 py-3 text-right align-top">
               <div class="inline-flex items-center justify-end gap-2">
+                <Button v-if="canQuickBuild(item)" variant="secondary" size="sm" class="rounded-md" type="button" :loading="isBuildingDocument(item.documentId)" loading-text="提交中" @click="quickBuild(item)">构建</Button>
                 <Button variant="outline" size="sm" class="rounded-md" type="button" @click="openDocumentDetail(item.documentId)">查看</Button>
                 <Button variant="destructive" size="sm" class="rounded-md" type="button" :loading="isDeletingDocument(item.documentId)" loading-text="删除中" :disabled="!canDeleteDocument(item)" :title="buildDeleteTitle(item)" @click="deleteDocument(item)">删除</Button>
               </div>
@@ -212,6 +213,7 @@
             <div class="col-span-2"><dt class="text-muted-foreground">阶段详情</dt><dd class="mt-0.5 text-foreground">{{ documentStageDetail(item) }}</dd></div>
           </dl>
           <div class="mt-3 flex justify-end gap-2">
+            <Button v-if="canQuickBuild(item)" variant="secondary" size="lg" class="rounded-md" type="button" :loading="isBuildingDocument(item.documentId)" loading-text="提交中" @click="quickBuild(item)">构建</Button>
             <Button variant="outline" size="lg" class="rounded-md" type="button" @click="openDocumentDetail(item.documentId)">查看</Button>
             <Button variant="destructive" size="lg" class="rounded-md" type="button" :loading="isDeletingDocument(item.documentId)" loading-text="删除中" :disabled="!canDeleteDocument(item)" :title="buildDeleteTitle(item)" @click="deleteDocument(item)">删除</Button>
           </div>
@@ -235,7 +237,9 @@ import { reactive, ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowPathIcon, ArrowUpTrayIcon } from '@heroicons/vue/24/outline'
 import { APIError, manageApi } from '../../api/api'
-import { formatDateTime, formatFileSize, hasCode } from '../../utils/manageFormat'
+import { denyPortfolioWrite } from '../../utils/demoAccounts'
+import { getAdminOperatorId } from '../../utils/adminAuth'
+import { formatDateTime, formatFileSize, hasCode, sanitizeOperatorError } from '../../utils/manageFormat'
 import { useConfirm } from '@/composables/useConfirm'
 const { confirm } = useConfirm()
 import { Button } from '@/components/ui/button'
@@ -252,6 +256,7 @@ import PageHeader from '@/components/system/PageHeader.vue'
 import StatusBadge from '@/components/system/StatusBadge.vue'
 import { createLatestRequestGuard, resolveDocumentPrimaryStatus } from '@/features/admin/adminBehavior'
 import {
+  buildIndexRequest,
   buildUploadRequest,
   createDocumentMetadataDraft,
   DOCUMENT_LABEL_OPTIONS,
@@ -261,7 +266,7 @@ import { documentLabelDisplayValue, documentLabelStorageValue } from '@/features
 
 const router = useRouter()
 const requestGuard = createLatestRequestGuard()
-const OPERATOR_ID = '10001'
+const OPERATOR_ID = getAdminOperatorId()
 const DEFAULT_PAGE_SIZE = 12
 
 const uploadModalVisible = ref(false)
@@ -275,6 +280,7 @@ const uploadForm = reactive({
 })
 
 function openUploadModal() {
+  if (denyPortfolioWrite((message) => showNotice(message, 'danger'))) return
   uploadErrors.value = []
   uploadModalVisible.value = true
 }
@@ -303,6 +309,7 @@ const currentPage = ref(1)
 const pageSize = ref(DEFAULT_PAGE_SIZE)
 const total = ref(0)
 const deletingDocumentId = ref('')
+const buildingDocumentId = ref('')
 const pageNotice = reactive({ type: 'info', message: '' })
 const knowledgeBaseOptions = ref([])
 
@@ -423,6 +430,40 @@ function documentStageDetail(item) {
 
 function isDeletingDocument(documentId) { return String(deletingDocumentId.value || '') === String(documentId || '') }
 
+function isBuildingDocument(documentId) { return String(buildingDocumentId.value || '') === String(documentId || '') }
+
+function canQuickBuild(item) {
+  return Boolean(item?.documentId)
+    && Boolean(item?.currentPlanId)
+    && hasCode(item?.strategyStatus, 3)
+    && !hasCode(item?.indexStatus, 3)
+    && !hasRunningDocumentTask(item)
+    && !buildingDocumentId.value
+}
+
+async function quickBuild(item) {
+  if (denyPortfolioWrite((message) => showNotice(message, 'danger'))) return
+  if (!canQuickBuild(item)) return
+  const documentId = String(item.documentId)
+  buildingDocumentId.value = documentId
+  clearNotice()
+  try {
+    const result = await manageApi.buildIndex(buildIndexRequest({
+      documentId,
+      currentPlanId: item.currentPlanId,
+      confirmed: true,
+      dirty: false,
+      operatorId: OPERATOR_ID
+    }))
+    showNotice(`索引任务 ${result.taskId || ''} 已创建，正在异步构建。`, 'success')
+    await loadDocuments(currentPage.value)
+  } catch (error) {
+    showNotice(normalizeError(error, '提交构建失败'), 'danger')
+  } finally {
+    buildingDocumentId.value = ''
+  }
+}
+
 function hasRunningDocumentTask(item) {
   return hasCode(item?.latestTaskStatus, 1) || hasCode(item?.latestTaskStatus, 2)
     || hasCode(item?.parseStatus, 2) || hasCode(item?.indexStatus, 2)
@@ -468,6 +509,7 @@ async function submitUpload() {
 }
 
 async function deleteDocument(item) {
+  if (denyPortfolioWrite((message) => showNotice(message, 'danger'))) return
   if (!item?.documentId) return
   if (hasRunningDocumentTask(item)) { showNotice('当前文档存在进行中的任务，请等待任务完成后再删除。', 'danger'); return }
   const documentId = String(item.documentId)
@@ -487,8 +529,8 @@ async function deleteDocument(item) {
 }
 
 function normalizeError(error, fallbackMessage) {
-  if (error instanceof APIError && error.message) return error.message
-  if (error instanceof Error && error.message) return error.message
+  if (error instanceof APIError && error.message) return sanitizeOperatorError(error.message, fallbackMessage)
+  if (error instanceof Error && error.message) return sanitizeOperatorError(error.message, fallbackMessage)
   return fallbackMessage
 }
 

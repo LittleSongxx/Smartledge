@@ -1,13 +1,14 @@
 <script setup>
 import { AcademicCapIcon } from '@heroicons/vue/24/outline'
+import { RouterLink } from 'vue-router'
 import { Button } from '@/components/ui/button'
 
 /*
  * 会话端和后台都要有这个入口，两处的地址、图标、提示文案必须一致，
- * 所以收在一个组件里，而不是两处各写一遍 <a>。
+ * 所以收在一个组件里，而不是两处各写一遍。
  */
-const GUIDE_URL = 'https://articles.zsxq.com/id_jaib6bgwlisp.html'
-const GUIDE_TITLE = '如何学习本项目：架构拆解与上手路线（新窗口打开）'
+const GUIDE_PATH = '/guide'
+const GUIDE_TITLE = '如何学习本项目：架构拆解与上手路线'
 
 defineProps({
   /*
@@ -29,9 +30,9 @@ defineProps({
       aria-label 两种形态都给全句：可见文字「如何学习」是它的子串，
       满足 label-in-name，同时读屏能听到这个链接到底通向什么。
     -->
-    <a :href="GUIDE_URL" target="_blank" rel="noopener noreferrer" :title="GUIDE_TITLE" :aria-label="GUIDE_TITLE">
+    <RouterLink :to="GUIDE_PATH" :title="GUIDE_TITLE" :aria-label="GUIDE_TITLE">
       <AcademicCapIcon :data-icon="label ? 'inline-start' : undefined" aria-hidden="true" />
       <span v-if="label" class="hidden sm:inline">{{ label }}</span>
-    </a>
+    </RouterLink>
   </Button>
 </template>

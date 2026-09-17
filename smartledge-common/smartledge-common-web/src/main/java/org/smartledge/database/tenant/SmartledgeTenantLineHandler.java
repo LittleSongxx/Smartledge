@@ -20,7 +20,7 @@ import java.util.Set;
  */
 public class SmartledgeTenantLineHandler implements TenantLineHandler {
 
-    /** 已登记 tenant_id 的业务表。与 sql/表结构/迁移/S21-多租户与RBAC-Mysql.sql 的表清单保持一致。 */
+    /** 已登记 tenant_id 的业务表。与 S21 迁移及后续新增租户表（含 S24 长期记忆）保持一致。 */
     public static final Set<String> TENANT_TABLES = Set.of(
         "smartledge_knowledge_base",
         "smartledge_knowledge_scope_node",
@@ -43,11 +43,17 @@ public class SmartledgeTenantLineHandler implements TenantLineHandler {
         "smartledge_chat_retrieval_result",
         "smartledge_chat_channel_execution",
         "smartledge_chat_memory_summary",
+        "smartledge_long_term_memory",
         "smartledge_document_acl",
         "smartledge_user",
         "smartledge_role",
         "smartledge_user_role",
-        "smartledge_role_permission"
+        "smartledge_role_permission",
+        "smartledge_knowledge_route_trace",
+        "smartledge_document_strategy_plan",
+        "smartledge_document_strategy_step",
+        "smartledge_document_parse_artifact",
+        "smartledge_document_task_log"
     );
 
     @Override

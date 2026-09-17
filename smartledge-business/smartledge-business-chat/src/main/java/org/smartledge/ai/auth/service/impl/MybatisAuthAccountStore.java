@@ -95,7 +95,10 @@ public class MybatisAuthAccountStore implements AuthAccountStore {
                 account.getFailedAttempts() == null ? 0 : account.getFailedAttempts(),
                 account.getLockedUntil() == null
                     ? null
-                    : account.getLockedUntil().toInstant()
+                    : account.getLockedUntil().toInstant(),
+                account.getTokenVersion() == null || account.getTokenVersion() < 1
+                    ? 1L
+                    : account.getTokenVersion()
             ));
         });
     }
@@ -178,5 +181,43 @@ public class MybatisAuthAccountStore implements AuthAccountStore {
             userId,
             java.util.Date.from(loginAt == null ? Instant.now() : loginAt)
         ));
+    }
+
+    @Override
+    public Optional<SessionAccount> findSessionAccount(Long tenantId, Long userId) {
+        if (tenantId == null || userId == null) {
+            return Optional.empty();
+        }
+        boolean tenantEnabled = Boolean.TRUE.equals(TenantContext.callAsSystem(() -> {
+            AuthTenant tenant = tenantMapper.selectById(tenantId);
+            return tenant != null && java.util.Objects.equals(tenant.getStatus(), ENABLED);
+        }));
+        return TenantContext.callWith(tenantId, () -> {
+            AuthUserAccount account = userAccountMapper.selectOne(
+                new LambdaQueryWrapper<AuthUserAccount>()
+                    .eq(AuthUserAccount::getTenantId, tenantId)
+                    .eq(AuthUserAccount::getId, userId)
+                    .last("LIMIT 1"));
+            if (account == null) {
+                return Optional.empty();
+            }
+            long version = account.getTokenVersion() == null || account.getTokenVersion() < 1
+                ? 1L
+                : account.getTokenVersion();
+            return Optional.of(new SessionAccount(
+                tenantId,
+                userId,
+                java.util.Objects.equals(account.getStatus(), ENABLED),
+                tenantEnabled,
+                version));
+        });
+    }
+
+    @Override
+    public void incrementTokenVersion(Long tenantId, Long userId) {
+        if (tenantId == null || userId == null) {
+            return;
+        }
+        TenantContext.runWith(tenantId, () -> userAccountMapper.incrementTokenVersion(tenantId, userId));
     }
 }

@@ -151,6 +151,11 @@ public class KnowledgeRouteServiceImpl implements KnowledgeRouteService {
                            KnowledgeRouteDecision decision) {
         SuperAgentKnowledgeRouteTrace trace = new SuperAgentKnowledgeRouteTrace();
         trace.setId(uidGenerator.getUid());
+        Long tenantId = org.smartledge.database.tenant.TenantContext.get();
+        if (tenantId == null || tenantId <= 0) {
+            throw new IllegalStateException("写入知识路由追踪缺少租户上下文");
+        }
+        trace.setTenantId(tenantId);
         trace.setConversationId(conversationId);
         trace.setExchangeId(exchangeId);
         trace.setQuestion(context == null ? "" : context.getQuestion());

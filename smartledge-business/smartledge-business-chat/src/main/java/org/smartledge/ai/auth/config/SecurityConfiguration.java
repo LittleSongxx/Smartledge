@@ -24,8 +24,8 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
  * 的症状是 403，而不是悄悄对全网开放。</p>
  *
  * <p>两端隔离靠 token 用途：{@code /manage/**} 与 {@code /admin/auth/**} 要求管理端用途，
- * 因此用户端 token 无法管理接口；{@code /api/chat/**} 接受任意已认证主体
- * （管理员本身也是租户内的用户，天然可以对话）。接口级权限判定在
+ * 因此用户端 token 无法管理接口；{@code /api/chat/**} 要求 {@code chat:use}；
+ * {@code /api/auth/me} 接受任意已认证主体。接口级权限判定在
  * {@code ManagePermissionInterceptor} 中按方法注解执行。</p>
  *
  * <p>无状态：没有 session、没有表单登录、没有 CSRF token（纯 API + Bearer token，
@@ -60,7 +60,8 @@ public class SecurityConfiguration {
                 .requestMatchers("/manage/**").hasAuthority(SecurityAuthorities.AUDIENCE_ADMIN)
                 .requestMatchers("/admin/auth/**").hasAuthority(SecurityAuthorities.AUDIENCE_ADMIN)
                 .requestMatchers("/actuator/**").hasAuthority(SecurityAuthorities.AUDIENCE_ADMIN)
-                .requestMatchers("/api/chat/**").authenticated()
+                .requestMatchers("/api/auth/me").authenticated()
+                .requestMatchers("/api/chat/**").hasAuthority(SecurityAuthorities.permission("chat:use"))
                 .anyRequest().denyAll())
             .exceptionHandling(handling -> handling
                 .authenticationEntryPoint(authenticationEntryPoint)

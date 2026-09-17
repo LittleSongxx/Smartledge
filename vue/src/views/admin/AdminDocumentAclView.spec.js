@@ -38,7 +38,9 @@ const DOCUMENTS = {
     documentName: '123',
     knowledgeBaseName: '123',
     indexStatus: '3',
-    indexStatusName: '已构建'
+    indexStatusName: '已构建',
+    originalFileName: '123.md',
+    canManageAcl: true
   }]
 }
 
@@ -114,7 +116,7 @@ describe('S23 B3 文档授权界面', () => {
     expect(wrapper.text()).toContain('123')
     // 夹具按**真实响应形状**给字段（documentId，不是 id）：界面若读了不存在的字段，
     // 这里会渲染出 undefined，从而在单测层面就能发现，而不是等到真实界面报"文档id格式非法"。
-    expect(wrapper.text()).toContain(DOCUMENT_ID)
+    expect(wrapper.text()).not.toContain(DOCUMENT_ID)
 
     await openAclPanel()
 
@@ -125,7 +127,7 @@ describe('S23 B3 文档授权界面', () => {
     // 已撤销的行仍然可见，但状态不同，且不再提供撤销按钮。
     expect(panel.text()).toContain('已撤销')
     // 调用者自己的有效权限来自后端同源判定。
-    expect(panel.text()).toContain('MANAGE')
+    expect(panel.text()).toContain('可管理')
   })
 
   it('grants to a selected principal and posts ids as strings', async () => {
@@ -168,6 +170,16 @@ describe('S23 B3 文档授权界面', () => {
       principalType: 'ROLE',
       principalId: '1'
     })
+  })
+
+  it('hides the grant button when the caller cannot manage the document ACL', async () => {
+    apiMocks.queryDocumentPage.mockResolvedValue({
+      ...DOCUMENTS,
+      records: [{ ...DOCUMENTS.records[0], canManageAcl: false }]
+    })
+    await mountView()
+    expect(wrapper.findAll('button').some((button) => button.text() === '授权')).toBe(false)
+    expect(wrapper.text()).toContain('仅所有者或可管理权限可授权')
   })
 
   it('surfaces the backend refusal readably instead of pretending success', async () => {

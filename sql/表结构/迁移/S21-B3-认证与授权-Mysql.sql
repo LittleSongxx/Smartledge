@@ -26,17 +26,18 @@ VALUES
     (14, 'console:access', '管理台访问', 'system',   '登录管理台并访问管理接口的前提权限', NOW(), NOW(), 1),
     (15, 'document:write', '编辑文档',   'document', '确认策略、触发索引构建、重算文档画像', NOW(), NOW(), 1);
 
--- ADMIN 角色重新对齐全部权限（含本次新增的两个）。重跑是安全的：主键由 role*100+perm 推导，INSERT IGNORE。
+-- ADMIN 重新对齐租户内权限（含本次新增），但不含 tenant:manage。
 INSERT IGNORE INTO smartledge_role_permission (id, tenant_id, role_id, permission_id, create_time, edit_time, status)
 SELECT 1000 + r.id * 100 + p.id, r.tenant_id, r.id, p.id, NOW(), NOW(), 1
   FROM smartledge_role r CROSS JOIN smartledge_permission p
- WHERE r.role_code = 'ADMIN';
+ WHERE r.role_code = 'ADMIN'
+   AND p.permission_code <> 'tenant:manage';
 
 -- CURATOR：文档接入与解析链路的全部权限 + 管理台访问，但不含用户/租户管理。
 INSERT IGNORE INTO smartledge_role_permission (id, tenant_id, role_id, permission_id, create_time, edit_time, status)
 SELECT 2000 + r.id * 100 + p.id, r.tenant_id, r.id, p.id, NOW(), NOW(), 1
   FROM smartledge_role r JOIN smartledge_permission p
-    ON p.permission_code IN ('kb:read','kb:write','document:read','document:upload','document:write',
+    ON p.permission_code IN ('kb:read','kb:write','document:read','document:read-all','document:upload','document:write',
                              'document:delete','document:acl:manage','chat:use','observe:read',
                              'config:read','console:access')
  WHERE r.role_code = 'CURATOR';

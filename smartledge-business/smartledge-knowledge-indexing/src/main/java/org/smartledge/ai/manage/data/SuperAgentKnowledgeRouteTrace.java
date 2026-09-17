@@ -25,6 +25,8 @@ public class SuperAgentKnowledgeRouteTrace extends BaseTableData {
     @TableId(value = "id", type = IdType.INPUT)
     private Long id;
 
+    private Long tenantId;
+
     private String conversationId;
 
     private Long exchangeId;

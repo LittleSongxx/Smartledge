@@ -20,6 +20,7 @@ public class RankFeatureBundle {
 
     private double rankWeight;
 
+    /** 仅观测/兼容配置，不参与加权 RRF。 */
     private double originalScoreWeight;
 
     private double metadataBoostWeight;

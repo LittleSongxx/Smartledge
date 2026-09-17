@@ -91,24 +91,66 @@ public final class SourceRankingWindow {
     }
 
     private Result buildFailure(List<RetrievalDocument> sources, int cap, RuntimeException exception) {
-        List<SourceRankingWindowDecision> decisions = new ArrayList<>(sources.size());
+        List<RetrievalDocument> included = new ArrayList<>();
+        List<SourceRankingWindowDecision> decisions = new ArrayList<>();
+        List<SourceRankingWindowCandidate> candidates = new ArrayList<>();
+        LinkedHashSet<String> seen = new LinkedHashSet<>();
         for (int index = 0; index < sources.size(); index++) {
             RetrievalDocument source = sources.get(index);
             if (source == null) {
                 continue;
             }
-            EvidenceCandidateIdentity.ensure(source);
-            decisions.add(new SourceRankingWindowDecision(
-                EvidenceCandidateIdentity.candidateId(source),
-                index + 1,
-                null,
-                cap,
-                WindowDisposition.FILTERED,
-                WindowReason.FILTERED_BY_SOURCE_RANKING_WINDOW_BUILD_FAILURE,
-                OrderingSource.FUSION_INPUT_ORDER
-            ));
+            try {
+                EvidenceCandidateIdentity.ensure(source);
+            }
+            catch (RuntimeException ignored) {
+                continue;
+            }
+            String candidateId = EvidenceCandidateIdentity.candidateId(source);
+            if (!seen.add(candidateId)) {
+                decisions.add(new SourceRankingWindowDecision(
+                    candidateId,
+                    index + 1,
+                    null,
+                    cap,
+                    WindowDisposition.FILTERED,
+                    WindowReason.FILTERED_BY_SOURCE_RANKING_WINDOW_BUILD_FAILURE,
+                    OrderingSource.FUSION_INPUT_ORDER
+                ));
+                continue;
+            }
+            if (included.size() < cap) {
+                included.add(source);
+                decisions.add(new SourceRankingWindowDecision(
+                    candidateId,
+                    index + 1,
+                    included.size(),
+                    cap,
+                    WindowDisposition.INCLUDED,
+                    WindowReason.INCLUDED_IN_SOURCE_RANKING_WINDOW,
+                    OrderingSource.FUSION_INPUT_ORDER
+                ));
+                candidates.add(new SourceRankingWindowCandidate(
+                    candidateId,
+                    EvidenceCandidateIdentity.lineageIdentity(source),
+                    EvidenceIdentityResolver.citationIdentityValue(source),
+                    EvidenceCandidateIdentity.identityResolutionStatus(source),
+                    CandidateLane.SOURCE
+                ));
+            }
+            else {
+                decisions.add(new SourceRankingWindowDecision(
+                    candidateId,
+                    index + 1,
+                    null,
+                    cap,
+                    WindowDisposition.FILTERED,
+                    WindowReason.FILTERED_BY_SOURCE_RANKING_WINDOW_BUILD_FAILURE,
+                    OrderingSource.FUSION_INPUT_ORDER
+                ));
+            }
         }
-        return new Result(List.of(), decisions, List.of(), true,
+        return new Result(included, decisions, candidates, true,
             exception == null ? "" : exception.getClass().getSimpleName());
     }
 

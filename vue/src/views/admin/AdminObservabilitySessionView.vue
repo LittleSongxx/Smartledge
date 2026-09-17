@@ -159,7 +159,8 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { ArrowLeftIcon, ArrowRightIcon, DocumentTextIcon, SparklesIcon } from '@heroicons/vue/24/outline'
-import { chatApi } from '../../api/api'
+import { manageApi } from '../../api/api'
+import { denyPortfolioWrite } from '../../utils/demoAccounts'
 import {
   formatDateTime,
   formatExecutionMode,
@@ -220,7 +221,7 @@ async function loadSession(options = {}) {
   if (silent) { pollingSession.value = true } else { loadingSession.value = true }
   pageError.value = ''
   try {
-    activeSession.value = await chatApi.getSession(conversationId.value)
+    activeSession.value = await manageApi.getObservabilitySession(conversationId.value)
     exchangePage.value = Math.min(exchangePage.value, exchangePageCount.value)
   } catch (error) {
     pageError.value = normalizeError(error, '加载会话详情失败')
@@ -239,11 +240,12 @@ function schedulePolling() {
 }
 
 async function rebuildSummary() {
+  if (denyPortfolioWrite((message) => { pageError.value = message })) return
   if (!conversationId.value || rebuildingSummary.value) return
   rebuildingSummary.value = true
   pageError.value = ''
   try {
-    const summary = await chatApi.rebuildConversationSummary(conversationId.value)
+    const summary = await manageApi.rebuildObservabilityConversationSummary(conversationId.value)
     if (activeSession.value?.conversationId === conversationId.value) {
       activeSession.value = { ...activeSession.value, memorySummary: summary }
     }

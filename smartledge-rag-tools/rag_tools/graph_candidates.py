@@ -312,8 +312,6 @@ def handle(request: GraphExtractRequest) -> GraphExtractResponse:
                           "pageRange": chunk.page_range, "bboxJson": chunk.bbox_json, "sectionPath": chunk.section_path,
                           "metadata": {"confidence": evidence.confidence, "sourceId": evidence.sourceId,
                                        "start": source["start"], "end": source["end"]}})
-    if time.monotonic() >= deadline:
-        fail("GRAPH_LLM_TIMEOUT", 504)
     return GraphExtractResponse(entities=entities, relations=relations, evidences=evidences,
         metadata={"schemaVersion": VERSION, "operation": "extract", "inputFingerprint": request.input_fingerprint,
                   "configurationFingerprint": fingerprint, "planFingerprint": request.plan_fingerprint,

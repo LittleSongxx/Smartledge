@@ -13,7 +13,8 @@ const mocks = vi.hoisted(() => ({
   saveKnowledgeBase: vi.fn(),
   deleteKnowledgeBase: vi.fn(),
   querySystemConfigCurrent: vi.fn(),
-  listSessionsPage: vi.fn()
+  listObservabilitySessionsPage: vi.fn(),
+  buildIndex: vi.fn()
 }))
 
 vi.mock('vue-router', async () => {
@@ -38,9 +39,10 @@ vi.mock('../../api/api', () => ({
     uploadDocument: mocks.uploadDocument,
     saveKnowledgeBase: mocks.saveKnowledgeBase,
     deleteKnowledgeBase: mocks.deleteKnowledgeBase,
-    querySystemConfigCurrent: mocks.querySystemConfigCurrent
-  },
-  chatApi: { listSessionsPage: mocks.listSessionsPage }
+    querySystemConfigCurrent: mocks.querySystemConfigCurrent,
+    listObservabilitySessionsPage: mocks.listObservabilitySessionsPage,
+    buildIndex: mocks.buildIndex
+  }
 }))
 
 const documentRecord = {
@@ -79,7 +81,7 @@ beforeEach(() => {
     ['rag.raptorSummaryQualityFloor', 0.42]
   ].map(([configKey, value]) => ({ configKey, value })) }] })
   mocks.queryDocumentPage.mockResolvedValue({ records: [documentRecord], pageNo: 1, pageSize: 12, total: 25 })
-  mocks.listSessionsPage.mockResolvedValue({
+  mocks.listObservabilitySessionsPage.mockResolvedValue({
     sessions: [{
       conversationId: 'conversation-1',
       latestQuestion: '年假怎么申请？',
@@ -328,12 +330,12 @@ describe('F05 observability list behavior', () => {
   it('preserves explicit string pagination and filter parameters', async () => {
     const wrapper = mount(AdminObservabilityListView)
     await flushPromises()
-    expect(mocks.listSessionsPage).toHaveBeenLastCalledWith({ keyword: '', chatMode: 'ALL', turnStatus: 'ALL', pageNo: '1', pageSize: '12' })
+    expect(mocks.listObservabilitySessionsPage).toHaveBeenLastCalledWith({ keyword: '', chatMode: 'ALL', turnStatus: 'ALL', pageNo: '1', pageSize: '12' })
 
     await wrapper.get('#session-search').setValue('年假')
     await wrapper.get('#session-search').trigger('keydown', { key: 'Enter' })
     await flushPromises()
-    expect(mocks.listSessionsPage).toHaveBeenLastCalledWith({ keyword: '年假', chatMode: 'ALL', turnStatus: 'ALL', pageNo: '1', pageSize: '12' })
+    expect(mocks.listObservabilitySessionsPage).toHaveBeenLastCalledWith({ keyword: '年假', chatMode: 'ALL', turnStatus: 'ALL', pageNo: '1', pageSize: '12' })
 
     expect(wrapper.text()).toContain('已完成')
     expect(wrapper.text()).not.toContain('border-l-4')

@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   buildPaginationItems,
   computeDocumentSummary,
   createLatestRequestGuard,
+  createNonOverlappingInterval,
   filterKnowledgeBases,
   resolveDocumentPrimaryStatus,
   resolveSessionStatus,
@@ -76,5 +77,36 @@ describe('F05 admin data contracts', () => {
     const second = guard.begin()
     expect(guard.isCurrent(first)).toBe(false)
     expect(guard.isCurrent(second)).toBe(true)
+  })
+
+  it('skips overlapping interval ticks and keeps polling after one error', async () => {
+    vi.useFakeTimers()
+    let release
+    const task = vi.fn(() => new Promise((resolve) => {
+      release = resolve
+    }))
+    const onError = vi.fn()
+    const poller = createNonOverlappingInterval(task, 1000, {
+      maxConsecutiveErrors: 3,
+      onError
+    })
+    poller.start()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(task).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(task).toHaveBeenCalledTimes(1)
+    release()
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(task).toHaveBeenCalledTimes(2)
+    release()
+    await Promise.resolve()
+    task.mockRejectedValueOnce(new Error('temp'))
+    await vi.advanceTimersByTimeAsync(1000)
+    await Promise.resolve()
+    expect(onError).toHaveBeenCalledTimes(1)
+    expect(poller.isActive()).toBe(true)
+    poller.clear()
+    vi.useRealTimers()
   })
 })

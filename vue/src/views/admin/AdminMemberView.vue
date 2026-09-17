@@ -77,7 +77,7 @@
             </td>
             <td class="px-4 py-3 align-top">
               <div class="flex flex-wrap items-center gap-1.5">
-                <StatusBadge :tone="member.status === 1 ? 'success' : 'waiting'" :label="member.status === 1 ? '启用' : '停用'" />
+                <StatusBadge :tone="isMemberEnabled(member) ? 'success' : 'waiting'" :label="isMemberEnabled(member) ? '启用' : '停用'" />
                 <StatusBadge v-if="member.locked" tone="danger" label="锁定中" />
               </div>
             </td>
@@ -86,15 +86,15 @@
               <div class="flex flex-wrap justify-end gap-1.5">
                 <Button variant="outline" size="sm" class="rounded-md" type="button" :disabled="actionLoading" @click="openEditDialog(member)">编辑</Button>
                 <Button
-                  :variant="member.status === 1 ? 'destructive' : 'secondary'"
+                  :variant="isMemberEnabled(member) ? 'destructive' : 'secondary'"
                   size="sm"
                   class="rounded-md"
                   type="button"
                   :disabled="actionLoading || isSelf(member)"
-                  :title="isSelf(member) ? '不能停用自己的账号' : (member.status === 1 ? '停用该成员' : '启用该成员')"
+                  :title="isSelf(member) ? '不能停用自己的账号' : (isMemberEnabled(member) ? '停用该成员' : '启用该成员')"
                   @click="toggleStatus(member)"
                 >
-                  {{ member.status === 1 ? '停用' : '启用' }}
+                  {{ isMemberEnabled(member) ? '停用' : '启用' }}
                 </Button>
               </div>
             </td>
@@ -170,6 +170,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { APIError, manageApi } from '../../api/api'
 import { getAdminUsername } from '../../utils/adminAuth'
+import { denyPortfolioWrite } from '../../utils/demoAccounts'
+import { hasCode } from '../../utils/manageFormat'
 
 const MIN_PASSWORD_LENGTH = 8
 
@@ -199,6 +201,10 @@ function errorMessage(error, fallback) {
 
 function isSelf(member) {
   return Boolean(member?.username) && member.username === currentUsername.value
+}
+
+function isMemberEnabled(member) {
+  return hasCode(member?.status, 1)
 }
 
 async function loadMembers({ silent = false } = {}) {
@@ -257,6 +263,7 @@ function resetForm() {
 }
 
 function openCreateDialog() {
+  if (denyPortfolioWrite((message) => { notice.value = { type: 'danger', message } })) return
   editingMember.value = null
   resetForm()
   dialogOpen.value = true
@@ -264,6 +271,7 @@ function openCreateDialog() {
 }
 
 function openEditDialog(member) {
+  if (denyPortfolioWrite((message) => { notice.value = { type: 'danger', message } })) return
   editingMember.value = member
   resetForm()
   form.value.displayName = member.displayName || ''
@@ -299,6 +307,7 @@ function validateForm() {
 }
 
 async function submitMember() {
+  if (denyPortfolioWrite((message) => { formError.value = message })) return
   const invalidReason = validateForm()
   if (invalidReason) {
     formError.value = invalidReason
@@ -332,12 +341,13 @@ async function submitMember() {
 }
 
 async function toggleStatus(member) {
+  if (denyPortfolioWrite((message) => { notice.value = { type: 'danger', message } })) return
   if (isSelf(member)) return
-  const nextStatus = member.status === 1 ? 0 : 1
+  const nextStatus = isMemberEnabled(member) ? 0 : 1
   actionLoading.value = true
   try {
     await manageApi.updateTenantMemberStatus({ id: String(member.id), status: String(nextStatus) })
-    notice.value = { type: 'info', message: nextStatus === 1 ? '成员已启用。' : '成员已停用。' }
+    notice.value = { type: 'info', message: hasCode(nextStatus, 1) ? '成员已启用。' : '成员已停用。' }
     await loadMembers({ silent: true })
   }
   catch (error) {

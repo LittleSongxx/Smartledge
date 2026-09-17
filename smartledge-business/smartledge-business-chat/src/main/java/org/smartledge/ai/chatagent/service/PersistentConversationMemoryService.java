@@ -13,6 +13,7 @@ import org.smartledge.ai.chatagent.model.ConversationExchangeView;
 import org.smartledge.ai.chatagent.model.ConversationMemorySummaryView;
 import org.smartledge.ai.chatagent.model.memory.ConversationMemoryContext;
 import org.smartledge.ai.chatagent.model.memory.ConversationSummaryPayload;
+import org.smartledge.ai.chatagent.model.memory.LongTermMemoryFact;
 import org.smartledge.ai.rag.runtime.config.ChatRagProperties;
 import org.smartledge.ai.prompt.PromptTemplateNames;
 import org.smartledge.ai.prompt.PromptTemplateService;
@@ -56,6 +57,7 @@ public class PersistentConversationMemoryService implements ConversationMemorySe
 
     private final ConversationArchiveStore conversationArchiveStore;
     private final SuperAgentChatMemorySummaryMapper summaryMapper;
+    private final LongTermMemoryStore longTermMemoryStore;
     private final ObjectMapper objectMapper;
     private final ChatRagProperties properties;
     private final ExecutorService chatMemorySummaryExecutorService;
@@ -68,6 +70,7 @@ public class PersistentConversationMemoryService implements ConversationMemorySe
 
     public PersistentConversationMemoryService(ConversationArchiveStore conversationArchiveStore,
                                                SuperAgentChatMemorySummaryMapper summaryMapper,
+                                               LongTermMemoryStore longTermMemoryStore,
                                                ObjectMapper objectMapper,
                                                ChatRagProperties properties,
                                                @Qualifier("chatMemorySummaryExecutorService") ExecutorService chatMemorySummaryExecutorService,
@@ -75,6 +78,7 @@ public class PersistentConversationMemoryService implements ConversationMemorySe
                                                PromptTemplateService promptTemplateService) {
         this.conversationArchiveStore = conversationArchiveStore;
         this.summaryMapper = summaryMapper;
+        this.longTermMemoryStore = longTermMemoryStore;
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.chatMemorySummaryExecutorService = chatMemorySummaryExecutorService;
@@ -109,6 +113,7 @@ public class PersistentConversationMemoryService implements ConversationMemorySe
             return ConversationMemoryContext.builder()
                 .assembledHistory(recentTranscript)
                 .longTermSummary("")
+                .longTermFacts(loadFacts(conversationId))
                 .recentTranscript(recentTranscript)
                 .answerRecentTranscript(answerRecentTranscript)
                 .summaryPayload(ConversationSummaryPayload.builder().build())
@@ -146,6 +151,7 @@ public class PersistentConversationMemoryService implements ConversationMemorySe
 
             .assembledHistory(assembleHistory(longTermSummary, recentTranscript))
             .longTermSummary(longTermSummary)
+            .longTermFacts(loadFacts(conversationId))
             .recentTranscript(recentTranscript)
             .answerRecentTranscript(answerRecentTranscript)
             .summaryPayload(summaryPayload)
@@ -727,10 +733,21 @@ public class PersistentConversationMemoryService implements ConversationMemorySe
         return date == null ? null : date.toInstant();
     }
 
+    private List<LongTermMemoryFact> loadFacts(String conversationId) {
+        try {
+            return longTermMemoryStore.listActiveFacts(conversationId, properties.getLongTermMemory().getMaxFacts());
+        }
+        catch (RuntimeException exception) {
+            log.warn("加载长期事实失败，本轮按空事实继续, conversationId={}", conversationId, exception);
+            return List.of();
+        }
+    }
+
     private ConversationMemoryContext emptyContext() {
         return ConversationMemoryContext.builder()
             .assembledHistory("")
             .longTermSummary("")
+            .longTermFacts(List.of())
             .recentTranscript("")
             .answerRecentTranscript("")
             .summaryPayload(ConversationSummaryPayload.builder().build())

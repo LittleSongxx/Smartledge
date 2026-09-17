@@ -1,0 +1,7 @@
+# 单元/切片测试本地密钥。生产路径必须用 SMARTLEDGE_ADMIN_TOKEN_SECRET，不能走系统参数。
+app:
+  admin-auth:
+    token-secret: test-only-admin-token-secret
+    token-expire-minutes: 720
+  tenant:
+    enforcement-enabled: true

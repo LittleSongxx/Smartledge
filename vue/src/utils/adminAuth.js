@@ -78,6 +78,18 @@ export function getAdminUsername() {
 }
 
 /**
+ * 当前后台操作者 ID。只读 JWT `uid`，没有可靠身份时返回空串，不编造 10001。
+ */
+export function getAdminOperatorId() {
+  const payload = parseTokenPayload(getAdminToken())
+  const userId = payload?.uid
+  if (userId == null || userId === '') {
+    return ''
+  }
+  return String(userId)
+}
+
+/**
  * 当前后台 token 携带的权限编码（登录时刻的快照，与后端 `perms` 声明同名）。
  */
 export function getAdminPermissions() {
@@ -104,4 +116,24 @@ export function hasAdminPermission(permissionCode) {
     return false
   }
   return getAdminPermissions().includes(permissionCode)
+}
+
+/**
+ * 侧栏角色文案按 token 能力推导，不再写死「管理员」。
+ */
+export function getAdminRoleLabel() {
+  const permissions = getAdminPermissions()
+  if (permissions.includes('portfolio:demo')) {
+    return '作品集试用'
+  }
+  if (permissions.includes('user:manage')) {
+    return '租户管理员'
+  }
+  if (permissions.includes('document:acl:manage') || permissions.includes('kb:write')) {
+    return '知识库管理员'
+  }
+  if (permissions.includes('console:access')) {
+    return '管理成员'
+  }
+  return '已登录'
 }

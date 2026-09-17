@@ -233,7 +233,7 @@ public class DocumentRagSnapshotServiceImpl implements DocumentRagSnapshotServic
             buildRaptorTree(raptorNodes),
             raptorQuality,
             listBuildLogs(indexTaskId),
-            "对话运行时的检索通道、RRF 融合、rerank 分数和 citation repair 结果在“对话观测”页面查看；本文档页只展示索引构建后的文档侧 RAG 产物。"
+            "对话运行时的检索通道、RRF 融合、rerank 分数和显式引用绑定结果在“对话观测”页面查看；本文档页只展示索引构建后的文档侧 RAG 产物。"
         );
     }
 

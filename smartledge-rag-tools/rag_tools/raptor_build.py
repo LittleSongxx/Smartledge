@@ -11,7 +11,7 @@ from fastapi import HTTPException
 
 from rag_tools.config import config_float, config_value
 from rag_tools.prompt_loader import load_prompt, render_prompt
-from rag_tools.semantic_model import SemanticModelUnavailable, embed_texts
+from rag_tools.semantic_model import SemanticModelUnavailable, embed_texts, l2_normalize_vectors
 from rag_tools.schemas.raptor_build import RaptorBuildRequest, RaptorBuildResponse, RaptorChunk, RaptorNode
 
 logger = logging.getLogger(__name__)
@@ -22,9 +22,11 @@ MAX_KEYWORDS = 12
 MAX_QUESTIONS = 6
 MIN_QUALITY_SCORE = 0.35
 LLM_CONTEXT_CHARS = 6500
-CLUSTER_METHOD = "sentence_embedding_ahc_balanced_v1"
+CLUSTER_METHOD = "sklearn_agglomerative_average_cosine_v1"
 TREE_BUILDER_METHOD = "balanced_hierarchical_v1"
 MAX_LLM_CONCURRENCY = 5
+AUTHORIZED_MAX_CLUSTER_SIZE = (2, 50)
+AUTHORIZED_MAX_LEVELS = (1, 8)
 
 CHINESE_STOP_TERMS = {
     "这个", "那个", "以及", "如果", "进行", "可以", "需要", "相关", "当前", "主要", "包括", "通过",
@@ -37,8 +39,12 @@ def build_raptor(request: RaptorBuildRequest) -> RaptorBuildResponse:
     if not chunks:
         return RaptorBuildResponse(nodes=[])
 
-    max_cluster_size = max(2, min(request.max_cluster_size or 6, 12))
-    max_levels = max(1, min(request.max_levels or 3, 5))
+    max_cluster_size = _authorized_budget(
+        request.max_cluster_size, 6, AUTHORIZED_MAX_CLUSTER_SIZE, "maxClusterSize"
+    )
+    max_levels = _authorized_budget(
+        request.max_levels, 3, AUTHORIZED_MAX_LEVELS, "maxLevels"
+    )
 
     nodes: list[RaptorNode] = []
     current_items: list[_TreeItem] = [_TreeItem.from_chunk(chunk) for chunk in chunks]
@@ -183,7 +189,7 @@ class _ClusterResult:
 
 def _cluster_items(items: list[_TreeItem], max_cluster_size: int) -> _ClusterResult:
     try:
-        vectors = embed_texts([_embedding_text(item) for item in items])
+        vectors = l2_normalize_vectors(embed_texts([_embedding_text(item) for item in items]))
     except SemanticModelUnavailable as exception:
         raise HTTPException(status_code=503, detail=str(exception)) from exception
     if len(items) <= max_cluster_size:
@@ -194,33 +200,7 @@ def _cluster_items(items: list[_TreeItem], max_cluster_size: int) -> _ClusterRes
         )
 
     similarity_matrix = _similarity_matrix(vectors)
-    clusters: list[list[int]] = [[index] for index in range(len(items))]
-    target_cluster_count = max(1, (len(items) + max_cluster_size - 1) // max_cluster_size)
-
-    while len(clusters) > target_cluster_count:
-        best_pair: tuple[int, int] | None = None
-        best_score = -1.0
-        best_balance = 0
-        for left_index in range(len(clusters)):
-            left_cluster = clusters[left_index]
-            for right_index in range(left_index + 1, len(clusters)):
-                right_cluster = clusters[right_index]
-                combined_size = len(left_cluster) + len(right_cluster)
-                if combined_size > max_cluster_size:
-                    continue
-                score = _average_link_similarity(left_cluster, right_cluster, similarity_matrix)
-                balance = min(len(left_cluster), len(right_cluster))
-                if score > best_score or (score == best_score and balance > best_balance):
-                    best_pair = (left_index, right_index)
-                    best_score = score
-                    best_balance = balance
-        if best_pair is None:
-            break
-        left_index, right_index = best_pair
-        merged = sorted(clusters[left_index] + clusters[right_index], key=lambda index: _first_chunk_id(items[index]))
-        clusters[left_index] = merged
-        del clusters[right_index]
-
+    clusters = _sklearn_agglomerative_clusters(vectors, max_cluster_size)
     clusters = _merge_singletons(clusters, similarity_matrix, max_cluster_size, items)
     clusters = [sorted(cluster, key=lambda index: _first_chunk_id(items[index])) for cluster in clusters]
     clusters.sort(key=lambda cluster: _first_chunk_id(items[cluster[0]]) if cluster else 0)
@@ -345,6 +325,49 @@ def _similarity_matrix(vectors: list[list[float]]) -> list[list[float]]:
     return matrix
 
 
+def _sklearn_agglomerative_clusters(vectors: list[list[float]], max_cluster_size: int) -> list[list[int]]:
+    import numpy as np
+    from sklearn.cluster import AgglomerativeClustering
+
+    matrix = np.asarray(vectors, dtype=float)
+    count = int(matrix.shape[0]) if matrix.ndim == 2 else 0
+    if count <= 1:
+        return [list(range(max(count, 0)))]
+    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    matrix = np.divide(matrix, np.maximum(norms, 1e-12))
+    target = max(1, (count + max_cluster_size - 1) // max_cluster_size)
+    target = min(target, count)
+    if target == count:
+        return [[index] for index in range(count)]
+    labels = AgglomerativeClustering(n_clusters=target, metric="cosine", linkage="average").fit_predict(matrix)
+    buckets: dict[int, list[int]] = {}
+    for index, label in enumerate(labels):
+        buckets.setdefault(int(label), []).append(index)
+    clusters = list(buckets.values())
+    return _split_oversized_clusters(clusters, matrix, max_cluster_size)
+
+
+def _split_oversized_clusters(
+    clusters: list[list[int]],
+    matrix,
+    max_cluster_size: int,
+) -> list[list[int]]:
+    result: list[list[int]] = []
+    for cluster in clusters:
+        if len(cluster) <= max_cluster_size:
+            result.append(cluster)
+            continue
+        if len(cluster) <= 2:
+            mid = max(1, len(cluster) // 2)
+            result.append(cluster[:mid])
+            result.append(cluster[mid:])
+            continue
+        sub_vectors = [matrix[index].tolist() for index in cluster]
+        for part in _sklearn_agglomerative_clusters(sub_vectors, max_cluster_size):
+            result.append([cluster[index] for index in part])
+    return result
+
+
 def _average_link_similarity(left_cluster: list[int], right_cluster: list[int], similarity_matrix: list[list[float]]) -> float:
     scores = [
         similarity_matrix[left_index][right_index]
@@ -440,6 +463,17 @@ def _cluster_signals(
         "avgIntraClusterSimilarity": round(avg_intra, 4),
         "treeBalanceScore": round(max(0.0, min(1.0, balance_score)), 4),
     }
+
+
+def _authorized_budget(value: int | None, default: int, bounds: tuple[int, int], field_name: str) -> int:
+    resolved = default if value is None else value
+    low, high = bounds
+    if not isinstance(resolved, int) or isinstance(resolved, bool) or not low <= resolved <= high:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{field_name} 必须在 {low}–{high} 之间，禁止静默收缩。收到: {value}",
+        )
+    return resolved
 
 
 def _dot(left: list[float], right: list[float]) -> float:

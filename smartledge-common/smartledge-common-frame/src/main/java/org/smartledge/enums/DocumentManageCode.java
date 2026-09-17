@@ -31,7 +31,9 @@ public enum DocumentManageCode {
 
     DOCUMENT_INDEX_UNAVAILABLE(20012, "文档当前没有可用索引"),
 
-    DOCUMENT_RETRIEVE_EMPTY(20013, "未检索到可用资料");
+    DOCUMENT_RETRIEVE_EMPTY(20013, "未检索到可用资料"),
+
+    DUPLICATE_CONTENT_HASH(20014, "同一知识库已存在相同内容的文档");
 
     private final Integer code;
 

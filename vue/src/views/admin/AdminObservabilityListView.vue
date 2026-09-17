@@ -87,7 +87,7 @@
               <div class="block min-w-0" data-session-summary>
                 <strong class="block truncate text-body-sm font-semibold text-foreground">{{ sessionTitle(session) }}</strong>
                 <span class="mt-1 block line-clamp-2 text-caption leading-relaxed text-muted-foreground">{{ sessionPreview(session) }}</span>
-                <code class="mt-1.5 block truncate font-mono text-micro text-muted-foreground">{{ session.conversationId }}</code>
+                <code class="sr-only">{{ session.conversationId }}</code>
               </div>
               <p v-if="session.latestTurnErrorMessage" class="mt-2 line-clamp-2 text-caption leading-relaxed text-destructive">最近异常：{{ truncate(session.latestTurnErrorMessage, 88) }}</p>
             </td>
@@ -177,7 +177,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowPathIcon } from '@heroicons/vue/24/outline'
-import { chatApi } from '../../api/api'
+import { manageApi } from '../../api/api'
 import {
   formatChatMode,
   formatTime,
@@ -223,12 +223,12 @@ const hasActiveFilters = computed(() => Boolean(keyword.value || modeFilter.valu
 
 const summaryStats = computed(() => {
   const running = sessions.value.filter((item) => item.running).length
-  const documentMode = sessions.value.filter((item) => item.chatMode === 'DOCUMENT').length
+  const documentMode = sessions.value.filter((item) => item.chatMode === 'DOCUMENT' || item.chatMode === 'AUTO_DOCUMENT').length
   const failed = sessions.value.filter((item) => item.latestTurnStatus === 'FAILED').length
   return [
     { label: '会话总数', value: totalSize.value, description: '当前筛选范围的会话总数' },
     { label: '本页运行中', value: running, description: '当前页正在生成的会话' },
-    { label: '本页文档问答', value: documentMode, description: '当前页走 RAG 链路的会话' },
+    { label: '本页知识问答', value: documentMode, description: '当前页走当前文档或自动知识链路的会话' },
     { label: '本页最近失败', value: failed, description: '当前页最近一轮失败的会话' }
   ]
 })
@@ -240,7 +240,7 @@ async function loadSessions(options = {}) {
   loadingSessions.value = true
   pageError.value = ''
   try {
-    const page = await chatApi.listSessionsPage({
+    const page = await manageApi.listObservabilitySessionsPage({
       keyword: options.keyword ?? keyword.value,
       chatMode: options.chatMode ?? modeFilter.value,
       turnStatus: options.turnStatus ?? statusFilter.value,

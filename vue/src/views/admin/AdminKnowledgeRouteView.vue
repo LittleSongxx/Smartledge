@@ -465,6 +465,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { manageApi } from '../../api/api'
+import { denyPortfolioWrite } from '../../utils/demoAccounts'
 import { useConfirm } from '@/composables/useConfirm'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -473,9 +474,10 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Checkbox } from '@/components/ui/checkbox'
 import ChildPageDialog from '@/components/system/ChildPageDialog.vue'
 import { buildRelationRequest, buildScopeRequest, buildTopicRequest } from '@/features/admin/knowledgeRouteWorkflow'
+import { getAdminOperatorId } from '../../utils/adminAuth'
 const { confirm } = useConfirm()
 
-const OPERATOR_ID = '10001'
+const OPERATOR_ID = getAdminOperatorId()
 const ANSWER_SHAPE_OPTIONS = Object.freeze([
   { value: 'list', label: '列表型回答' },
   { value: 'explain', label: '解释说明型回答' },
@@ -818,6 +820,7 @@ async function handleKnowledgeBaseChange() {
   await loadAll()
 }
 async function saveScope() {
+  if (denyPortfolioWrite((message) => showNotice(message, 'danger'))) return
   await withAction(async () => {
     const payload = buildScopeRequest(scopeForm)
     activeKnowledgeBaseId.value = payload.knowledgeBaseId
@@ -828,10 +831,12 @@ async function saveScope() {
   }, '知识范围已保存')
 }
 async function deleteScope() {
+  if (denyPortfolioWrite((message) => showNotice(message, 'danger'))) return
   if (!activeScope.value || !await confirm(`确认删除范围「${activeScope.value.scopeName}」吗？`, '确认删除')) return
   await withAction(async () => { await manageApi.deleteKnowledgeScope({ knowledgeBaseId: activeKnowledgeBaseId.value, id: activeScope.value.id || activeScope.value.scopeId, operatorId: OPERATOR_ID }); resetScopeForm(); closeDrawer(); await loadAll() }, '知识范围已删除')
 }
 async function saveTopic() {
+  if (denyPortfolioWrite((message) => showNotice(message, 'danger'))) return
   await withAction(async () => {
     const payload = buildTopicRequest({ ...topicForm, knowledgeBaseId: activeKnowledgeBaseId.value || topicForm.knowledgeBaseId })
     const data = await manageApi.saveKnowledgeTopic(payload)
@@ -842,12 +847,18 @@ async function saveTopic() {
   }, '知识主题已保存')
 }
 async function deleteTopic() {
+  if (denyPortfolioWrite((message) => showNotice(message, 'danger'))) return
   if (!activeTopic.value || !await confirm(`确认删除主题「${activeTopic.value.topicName}」吗？`, '确认删除')) return
   await withAction(async () => { await manageApi.deleteKnowledgeTopic({ knowledgeBaseId: activeKnowledgeBaseId.value, id: activeTopic.value.id || activeTopic.value.topicId, operatorId: OPERATOR_ID }); resetTopicForm(); relationForm.topicId = ''; closeDrawer(); await loadAll() }, '知识主题已删除')
 }
 async function loadProfile() { if (!profileDocumentId.value) return; await withAction(async () => { profile.value = await manageApi.queryDocumentProfile({ documentId: profileDocumentId.value }) }) }
-async function regenerateProfile() { if (!profileDocumentId.value) return; await withAction(async () => { profile.value = await manageApi.regenerateDocumentProfile({ documentId: profileDocumentId.value, operatorId: OPERATOR_ID }) }, '文档画像已重新生成') }
+async function regenerateProfile() {
+  if (denyPortfolioWrite((message) => showNotice(message, 'danger'))) return
+  if (!profileDocumentId.value) return
+  await withAction(async () => { profile.value = await manageApi.regenerateDocumentProfile({ documentId: profileDocumentId.value, operatorId: OPERATOR_ID }) }, '文档画像已重新生成')
+}
 async function regenerateAllProfiles() {
+  if (denyPortfolioWrite((message) => showNotice(message, 'danger'))) return
   if (!documents.value.length || !await confirm(`确认批量重建 ${documents.value.length} 份文档画像吗？`, '批量重建画像')) return
   batchLoading.value = true
   try { await manageApi.batchRegenerateDocumentProfiles({ documentIds: documents.value.map((item) => item.documentId), operatorId: OPERATOR_ID }); showNotice(`已触发 ${documents.value.length} 份文档的画像重建`, 'success'); if (profileDocumentId.value) await loadProfile() }
@@ -855,6 +866,7 @@ async function regenerateAllProfiles() {
   finally { batchLoading.value = false }
 }
 async function batchRepairProfiles() {
+  if (denyPortfolioWrite((message) => showNotice(message, 'danger'))) return
   const documentIds = [...selectedProfileRepairIds.value]
   if (!documentIds.length) { showNotice('请先选择要批量修复的文档。', 'danger'); return }
   batchLoading.value = true
@@ -867,6 +879,7 @@ async function loadRelations() {
   catch (error) { showNotice(error.message || '加载主题文档关联失败', 'danger') }
 }
 async function saveRelation() {
+  if (denyPortfolioWrite((message) => showNotice(message, 'danger'))) return
   await withAction(async () => {
     const payload = buildRelationRequest({ ...relationForm, knowledgeBaseId: activeKnowledgeBaseId.value || relationForm.knowledgeBaseId })
     await manageApi.saveTopicDocumentRelation(payload)
@@ -874,7 +887,10 @@ async function saveRelation() {
     closeDrawer()
   }, '主题文档关联已保存')
 }
-async function removeRelation(item) { await withAction(async () => { await manageApi.removeTopicDocumentRelation({ knowledgeBaseId: activeKnowledgeBaseId.value, topicId: item.topicId, documentId: item.documentId, operatorId: OPERATOR_ID }); await loadRelations() }, '主题文档关联已移除') }
+async function removeRelation(item) {
+  if (denyPortfolioWrite((message) => showNotice(message, 'danger'))) return
+  await withAction(async () => { await manageApi.removeTopicDocumentRelation({ knowledgeBaseId: activeKnowledgeBaseId.value, topicId: item.topicId, documentId: item.documentId, operatorId: OPERATOR_ID }); await loadRelations() }, '主题文档关联已移除')
+}
 function documentMetaLine(item = {}) { return item.knowledgeBaseName || '仅绑定知识库' }
 function parseTextList(value) { const n = String(value || '').trim(); if (!n) return []; return n.split(',').map((item) => item.trim()).filter(Boolean) }
 function formatAnswerShapeLabel(value) { return formatMappedLabel(value, ANSWER_SHAPE_LABEL_MAP) }

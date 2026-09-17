@@ -52,6 +52,9 @@ public class RagRuntimeOptions {
 
     private boolean raptorChannelEnabled;
 
+    @Builder.Default
+    private boolean forceExpensiveChannels = false;
+
     private HybridOptions hybrid;
 
     @Builder.Default
@@ -77,6 +80,7 @@ public class RagRuntimeOptions {
             .tableChannelEnabled(true)
             .graphRagChannelEnabled(true)
             .raptorChannelEnabled(true)
+            .forceExpensiveChannels(false)
             .hybrid(HybridOptions.defaults())
             .kbConfigConflictFields(new ArrayList<>())
             .build();
@@ -106,6 +110,7 @@ public class RagRuntimeOptions {
             .tableChannelEnabled(properties.isTableChannelEnabled())
             .graphRagChannelEnabled(properties.isGraphRagChannelEnabled())
             .raptorChannelEnabled(properties.isRaptorChannelEnabled())
+            .forceExpensiveChannels(false)
             .hybrid(HybridOptions.from(hybridProperties))
             .kbConfigConflictFields(new ArrayList<>())
             .build();
@@ -142,6 +147,7 @@ public class RagRuntimeOptions {
             .tableChannelEnabled(tableChannelEnabled)
             .graphRagChannelEnabled(graphRagChannelEnabled)
             .raptorChannelEnabled(raptorChannelEnabled)
+            .forceExpensiveChannels(forceExpensiveChannels)
             .hybrid(copiedHybrid)
             .kbConfigConflictFields(kbConfigConflictFields == null ? new ArrayList<>() : new ArrayList<>(kbConfigConflictFields))
             .build();

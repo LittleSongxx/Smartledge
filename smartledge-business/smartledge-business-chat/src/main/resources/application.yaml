@@ -329,3 +329,6 @@ management:
       export:
         # 是否启用 Micrometer 的 Prometheus 指标导出。
         enabled: true
+  tracing:
+    sampling:
+      probability: ${SMARTLEDGE_TRACING_SAMPLE:1.0}

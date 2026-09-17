@@ -5,11 +5,15 @@ import cn.hutool.core.util.StrUtil;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.smartledge.ai.manage.data.SuperAgentDocument;
 import org.smartledge.ai.manage.data.SuperAgentDocumentChunk;
 import org.smartledge.ai.knowledge.indexing.port.DocumentVectorConfigurationPort;
+import org.smartledge.ai.manage.mapper.SuperAgentDocumentMapper;
 import org.smartledge.ai.manage.service.DocumentVectorGateway;
+import org.smartledge.ai.manage.support.DocumentMetadataJsonParser;
 import org.smartledge.ai.manage.support.DocumentPgVectorConstants;
 import org.smartledge.ai.manage.support.DocumentTenantLookup;
+import org.smartledge.ai.manage.support.IndexRetrievalFilter;
 import org.smartledge.ai.manage.support.PgVectorTenantOperations;
 import org.smartledge.enums.DocumentManageCode;
 import org.smartledge.enums.DocumentVectorStatusEnum;
@@ -25,6 +29,7 @@ import org.springframework.stereotype.Service;
 
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.sql.Types;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -54,8 +59,8 @@ public class DefaultDocumentVectorGateway implements DocumentVectorGateway {
         (id, document_id, task_id, plan_id, parent_block_id, chunk_no, source_type, section_path, structure_node_id,
          structure_node_type, canonical_path, item_index, chunk_text, content_with_weight, chunk_type, title, keywords,
          questions, char_count, token_count, page_no, page_range, bbox_json, source_block_ids, embedding_model,
-         metadata_json, embedding, create_time, edit_time, status, tenant_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), CAST(? AS vector), NOW(), NOW(), ?, ?)
+         metadata_json, embedding, create_time, edit_time, status, tenant_id, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), CAST(? AS vector), NOW(), NOW(), ?, ?, ?)
         ON CONFLICT (id) DO UPDATE SET
             document_id = EXCLUDED.document_id,
             task_id = EXCLUDED.task_id,
@@ -85,12 +90,22 @@ public class DefaultDocumentVectorGateway implements DocumentVectorGateway {
             embedding = EXCLUDED.embedding,
             edit_time = NOW(),
             status = EXCLUDED.status,
-            tenant_id = EXCLUDED.tenant_id
+            tenant_id = EXCLUDED.tenant_id,
+            expires_at = EXCLUDED.expires_at
         """;
 
     private static final String DELETE_BY_DOCUMENT_SQL_TEMPLATE = "DELETE FROM %s WHERE document_id = ?";
 
     private static final String DELETE_BY_TASK_SQL_TEMPLATE = "DELETE FROM %s WHERE document_id = ? AND task_id = ?";
+
+    private static final String TOMBSTONE_BY_DOCUMENT_SQL_TEMPLATE =
+        "UPDATE %s SET status = 0, edit_time = NOW() WHERE document_id = ? AND status = 1";
+
+    private static final String TOMBSTONE_BY_TASK_SQL_TEMPLATE =
+        "UPDATE %s SET status = 0, edit_time = NOW() WHERE document_id = ? AND task_id = ? AND status = 1";
+
+    private static final String TOMBSTONE_STALE_TASKS_SQL_TEMPLATE =
+        "UPDATE %s SET status = 0, edit_time = NOW() WHERE document_id = ? AND task_id IS NOT NULL AND task_id <> ? AND status = 1";
 
     private final JdbcTemplate pgVectorJdbcTemplate;
 
@@ -104,6 +119,10 @@ public class DefaultDocumentVectorGateway implements DocumentVectorGateway {
 
     private final DocumentVectorConfigurationPort vectorConfiguration;
 
+    private final SuperAgentDocumentMapper documentMapper;
+
+    private final DocumentMetadataJsonParser metadataParser = new DocumentMetadataJsonParser();
+
 
     public DefaultDocumentVectorGateway(
         @Qualifier("documentManagePgVectorJdbcTemplate") JdbcTemplate pgVectorJdbcTemplate,
@@ -111,12 +130,14 @@ public class DefaultDocumentVectorGateway implements DocumentVectorGateway {
         DocumentTenantLookup documentTenantLookup,
         ObjectProvider<EmbeddingPort> embeddingModelProvider,
         ObjectMapper objectMapper,
-        DocumentVectorConfigurationPort vectorConfiguration) {
+        DocumentVectorConfigurationPort vectorConfiguration,
+        SuperAgentDocumentMapper documentMapper) {
         this.pgVectorJdbcTemplate = pgVectorJdbcTemplate;
         this.pgVectorOperations = pgVectorOperations;
         this.documentTenantLookup = documentTenantLookup;
         this.embeddingModelProvider = embeddingModelProvider;
         this.objectMapper = objectMapper;
+        this.documentMapper = documentMapper;
         this.vectorConfiguration = vectorConfiguration;
     }
 
@@ -325,6 +346,51 @@ public class DefaultDocumentVectorGateway implements DocumentVectorGateway {
         }
     }
 
+    @Override
+    public void tombstoneByDocumentId(Long documentId) {
+        if (documentId == null) {
+            return;
+        }
+        try {
+            String sql = TOMBSTONE_BY_DOCUMENT_SQL_TEMPLATE.formatted(DocumentPgVectorConstants.EMBEDDING_TABLE_NAME);
+            pgVectorOperations.update(vectorTenant(documentId), sql, documentId);
+        }
+        catch (Exception exception) {
+            throw new SuperAgentFrameException(DocumentManageCode.DOCUMENT_VECTOR_FAILED.getCode(),
+                "墓碑 PGVector 文档失败: " + exception.getMessage(), exception);
+        }
+    }
+
+    @Override
+    public void tombstoneByTask(Long documentId, Long taskId) {
+        if (documentId == null || taskId == null) {
+            return;
+        }
+        try {
+            String sql = TOMBSTONE_BY_TASK_SQL_TEMPLATE.formatted(DocumentPgVectorConstants.EMBEDDING_TABLE_NAME);
+            pgVectorOperations.update(vectorTenant(documentId), sql, documentId, taskId);
+        }
+        catch (Exception exception) {
+            throw new SuperAgentFrameException(DocumentManageCode.DOCUMENT_VECTOR_FAILED.getCode(),
+                "墓碑 PGVector 任务失败: " + exception.getMessage(), exception);
+        }
+    }
+
+    @Override
+    public void tombstoneStaleTasks(Long documentId, Long currentTaskId) {
+        if (documentId == null || currentTaskId == null || currentTaskId <= 0) {
+            return;
+        }
+        try {
+            String sql = TOMBSTONE_STALE_TASKS_SQL_TEMPLATE.formatted(DocumentPgVectorConstants.EMBEDDING_TABLE_NAME);
+            pgVectorOperations.update(vectorTenant(documentId), sql, documentId, currentTaskId);
+        }
+        catch (Exception exception) {
+            throw new SuperAgentFrameException(DocumentManageCode.DOCUMENT_VECTOR_FAILED.getCode(),
+                "墓碑 PGVector 旧世代失败: " + exception.getMessage(), exception);
+        }
+    }
+
     private void batchUpsert(String upsertSql,
                              List<SuperAgentDocumentChunk> chunkBatch,
                              List<float[]> embeddingBatch,
@@ -389,6 +455,13 @@ public class DefaultDocumentVectorGateway implements DocumentVectorGateway {
                 ps.setString(27, toVectorLiteral(embedding));
                 ps.setInt(28, 1);
                 ps.setLong(29, vectorTenantId);
+                SuperAgentDocument parent = documentMapper.selectById(chunk.getDocumentId());
+                if (parent == null || parent.getExpiresAt() == null) {
+                    ps.setNull(30, Types.TIMESTAMP);
+                }
+                else {
+                    ps.setTimestamp(30, Timestamp.valueOf(parent.getExpiresAt()));
+                }
             }
 
             @Override
@@ -424,6 +497,13 @@ public class DefaultDocumentVectorGateway implements DocumentVectorGateway {
 
     private String buildMetadataJson(SuperAgentDocumentChunk chunk, String embeddingModelName) {
         Map<String, Object> metadata = new LinkedHashMap<>();
+        SuperAgentDocument parent = documentMapper.selectById(chunk.getDocumentId());
+        metadata.put("tenantId", parent == null ? null : parent.getTenantId());
+        metadata.put("status", parent == null || parent.getStatus() == null ? 1 : parent.getStatus());
+        metadata.put("expiresAt", parent == null || parent.getExpiresAt() == null ? null : parent.getExpiresAt().toString());
+        if (parent != null) {
+            metadata.putAll(IndexRetrievalFilter.flattenUserScalars(metadataParser.parse(parent.getMetadataJson())));
+        }
 
         metadata.put("documentId", chunk.getDocumentId());
         metadata.put("taskId", chunk.getTaskId());

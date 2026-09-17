@@ -24,6 +24,8 @@ public class SuperAgentDocumentTaskLog extends BaseTableData {
     @TableId(value = "id", type = IdType.INPUT)
     private Long id;
 
+    private Long tenantId;
+
     private Long taskId;
 
     private Long documentId;

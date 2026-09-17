@@ -65,6 +65,25 @@ CREATE TABLE IF NOT EXISTS smartledge_chat_memory_summary (
     KEY idx_smartledge_chat_memory_summary_edit_time (edit_time)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='业务对话长期记忆摘要快照表';
 
+CREATE TABLE IF NOT EXISTS smartledge_long_term_memory (
+    id                      BIGINT       NOT NULL COMMENT '主键id',
+    tenant_id               BIGINT       NOT NULL DEFAULT '1' COMMENT '所属租户id',
+    dialogue_code           VARCHAR(64)  NOT NULL COMMENT '所属业务会话编号',
+    user_id                 BIGINT       DEFAULT NULL COMMENT '写入时的用户id，可空',
+    entity_key              VARCHAR(80)  NOT NULL COMMENT '事实实体键',
+    fact_text               VARCHAR(512) NOT NULL COMMENT '事实文本',
+    source_kind             VARCHAR(32)  NOT NULL COMMENT 'USER_EXPLICIT / MODEL_CANDIDATE',
+    lifecycle               VARCHAR(32)  NOT NULL COMMENT 'ACTIVE / SUPERSEDED / REJECTED',
+    provenance_exchange_id  BIGINT       NOT NULL DEFAULT '0' COMMENT '写入来源轮次',
+    version                 INT          NOT NULL DEFAULT '1' COMMENT '同键版本，从 1 递增',
+    create_time             DATETIME     DEFAULT NULL COMMENT '创建时间',
+    edit_time               DATETIME     DEFAULT NULL COMMENT '编辑时间',
+    status                  TINYINT(1)   NOT NULL DEFAULT '1' COMMENT '1:正常 0:删除',
+    PRIMARY KEY (id),
+    KEY idx_ltm_conversation_lifecycle (dialogue_code, lifecycle, status),
+    KEY idx_ltm_conversation_entity (dialogue_code, entity_key, version)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='会话级可寻址长期事实';
+
 CREATE TABLE IF NOT EXISTS smartledge_chat_exchange_trace_stage (
                                                                      id BIGINT NOT NULL COMMENT '主键id',
                                                                      dialogue_code VARCHAR(64) NOT NULL COMMENT '所属业务会话编号',
@@ -156,6 +175,11 @@ CREATE TABLE IF NOT EXISTS `smartledge_document` (
     `knowledge_base_id` bigint NOT NULL COMMENT '所属知识库id',
     `knowledge_base_name` varchar(128) NOT NULL COMMENT '所属知识库名称快照',
     `metadata_json` JSON DEFAULT NULL COMMENT '文档级用户元数据JSON；不含chunk/表格/向量系统元数据',
+    `content_hash` varchar(128) DEFAULT NULL COMMENT '文件内容SHA-256',
+    `source_uri` varchar(1024) DEFAULT NULL COMMENT '来源URI，默认 MinIO object url',
+    `language` varchar(16) DEFAULT NULL COMMENT '文档语言',
+    `effective_from` datetime DEFAULT NULL COMMENT '生效起点',
+    `expires_at` datetime DEFAULT NULL COMMENT '过期时间，空表示不过期',
     `current_plan_id` bigint DEFAULT NULL COMMENT '当前策略方案id',
     `last_parse_task_id` bigint DEFAULT NULL COMMENT '最近一次成功解析任务id',
     `structure_node_count` int DEFAULT '0' COMMENT '最近一次结构化解析生成的节点数',
@@ -169,6 +193,8 @@ CREATE TABLE IF NOT EXISTS `smartledge_document` (
     KEY `idx_strategy_status` (`strategy_status`),
     KEY `idx_index_status` (`index_status`),
     KEY `idx_knowledge_base_id` (`knowledge_base_id`),
+    KEY `idx_kb_content_hash` (`knowledge_base_id`, `content_hash`),
+    KEY `idx_expires_at` (`expires_at`),
     KEY `idx_current_plan_id` (`current_plan_id`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='文档表';
 

@@ -14,7 +14,7 @@
     -->
     <aside class="admin-sidebar hidden min-h-dvh border-r border-admin-border lg:flex">
       <div class="flex h-14 flex-none items-center gap-2 border-b border-border px-3">
-        <div class="grid size-8 flex-none place-items-center rounded-md bg-primary text-caption font-bold text-primary-foreground">NA</div>
+        <div class="grid size-8 flex-none place-items-center rounded-md bg-primary text-caption font-bold text-primary-foreground">SL</div>
         <strong v-if="!desktopCollapsed" class="min-w-0 flex-1 truncate text-body-sm font-semibold text-foreground">Smartledge</strong>
         <Button
           variant="ghost"
@@ -77,7 +77,7 @@
           </div>
           <div v-if="!desktopCollapsed" class="min-w-0 flex-1">
             <strong class="block truncate text-caption font-semibold text-foreground">{{ username }}</strong>
-            <span class="block text-micro text-muted-foreground">管理员</span>
+            <span class="block text-micro text-muted-foreground">{{ roleLabel }}</span>
           </div>
           <Button
             v-if="!desktopCollapsed"
@@ -115,7 +115,7 @@
         </DrawerHeader>
         <aside class="flex min-h-0 flex-1 flex-col">
           <div class="flex h-14 flex-none items-center gap-2 border-b border-border px-4">
-            <div class="grid size-8 place-items-center rounded-md bg-primary text-caption font-bold text-primary-foreground">NA</div>
+            <div class="grid size-8 place-items-center rounded-md bg-primary text-caption font-bold text-primary-foreground">SL</div>
             <strong class="text-body-sm font-semibold text-foreground">Smartledge</strong>
           </div>
           <nav class="min-h-0 flex-1 overflow-y-auto px-3 py-4" aria-label="移动端后台导航">
@@ -171,9 +171,13 @@
           <Bars3Icon aria-hidden="true" />
         </Button>
         <div class="min-w-0">
-          <p class="m-0 truncate text-caption text-muted-foreground">管理后台</p>
-          <h1 class="m-0 truncate text-body-sm font-semibold text-foreground">{{ pageTitle }}</h1>
+          <p class="m-0 truncate text-body-sm font-semibold text-foreground">管理后台</p>
         </div>
+        <p
+          v-if="isPortfolioDemo"
+          class="hidden min-w-0 truncate rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-caption text-amber-950 sm:block"
+          data-testid="portfolio-readonly-banner"
+        >试用账号只读展示：菜单与页面均可查看，增删改已关闭</p>
         <ProjectGuideLink label="如何学习" class="ml-auto flex-none" />
       </header>
 
@@ -217,7 +221,8 @@ import { Button } from '@/components/ui/button'
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/drawer'
 import { cn } from '@/lib/utils'
 import { adminAuthApi } from '../../api/api'
-import { clearAdminAuth, getAdminUsername, hasAdminPermission } from '../../utils/adminAuth'
+import { clearAdminAuth, getAdminRoleLabel, getAdminUsername, hasAdminPermission } from '../../utils/adminAuth'
+import { PORTFOLIO_DEMO_PERMISSION } from '../../utils/demoAccounts'
 
 const route = useRoute()
 const router = useRouter()
@@ -271,9 +276,10 @@ const visibleNavGroups = computed(() => navGroups
   }))
   .filter((group) => group.items.length > 0))
 
-const pageTitle = computed(() => route.meta?.title || '管理后台')
+const isPortfolioDemo = computed(() => hasAdminPermission(PORTFOLIO_DEMO_PERMISSION))
 const username = computed(() => getAdminUsername())
 const usernameInitial = computed(() => username.value.slice(0, 1).toUpperCase())
+const roleLabel = computed(() => getAdminRoleLabel())
 
 async function logout() {
   try {

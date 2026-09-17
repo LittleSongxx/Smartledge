@@ -32,7 +32,7 @@ public class AdminAuthController {
 
     @PostMapping("/logout")
     public ApiResponse<Void> logout() {
-        // 无状态 token：服务端没有会话可注销，客户端丢弃 token 即登出。
+        adminAuthService.logout();
         return ApiResponse.ok();
     }
 

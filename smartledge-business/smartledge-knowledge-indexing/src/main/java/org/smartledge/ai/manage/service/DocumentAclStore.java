@@ -32,6 +32,14 @@ public interface DocumentAclStore {
      */
     Set<Long> visibleDocumentIds(Collection<Long> documentIds, RequestIdentity identity);
 
+    /**
+     * 当前身份在本租户内可读的全部文档 id。
+     *
+     * <p>给管理端列表用：没有 {@code document:read-all} 时只能看见 ACL 授权过的文档。
+     * 失败同样 fail closed，返回空集合。</p>
+     */
+    Set<Long> visibleDocumentIdsForIdentity(RequestIdentity identity);
+
     /** 给定候选文档，返回该身份可写的子集（WRITE 或 MANAGE）。 */
     Set<Long> writableDocumentIds(Collection<Long> documentIds, RequestIdentity identity);
 
@@ -70,6 +78,13 @@ public interface DocumentAclStore {
      * @return 是否确实改变了某一行的状态（false 表示该主体本来就没有有效授权）
      */
     boolean revoke(Long documentId, String principalType, Long principalId, RequestIdentity identity);
+
+    /**
+     * 删除文档时撤销该文档全部 ACL（软删）。
+     *
+     * @return 被停用的有效授权行数
+     */
+    int revokeAllForDocument(Long documentId, RequestIdentity identity);
 
     /**
      * 一条授权记录（授权行本身，不含主体显示名 —— 名字由上层按主体类型解析）。
