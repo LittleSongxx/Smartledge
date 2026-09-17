@@ -1,0 +1,5 @@
+标题：{{title}}
+关键词：{{keywords}}
+请返回 JSON：{"summary":"..."}，summary 控制在 500 字以内。
+原文：
+{{sourceText}}

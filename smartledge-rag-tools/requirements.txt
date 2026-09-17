@@ -1,0 +1,11 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+sentence-transformers==3.3.1
+networkx==3.6.1
+markdown-it-py==3.0.0
+alibabacloud-docmind-api20220711==1.4.14
+alibabacloud-credentials==1.0.9
+PyMuPDF==1.24.14
+Pillow==12.2.0
+
+tokenizers>=0.21,<0.23

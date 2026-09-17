@@ -1,0 +1,26 @@
+# Python rag-tools local configuration.
+# Environment variables still take precedence over this file.
+
+ragTools:
+  documentParser:
+    aliyunDocMind:
+      endpoint: "${RAG_TOOLS_ALIYUN_DOCMIND_ENDPOINT:docmind-api.cn-hangzhou.aliyuncs.com}"
+      accessKeyId: "${ALIBABA_CLOUD_ACCESS_KEY_ID:}"
+      accessKeySecret: "${ALIBABA_CLOUD_ACCESS_KEY_SECRET:}"
+      timeoutSeconds: 600
+      pollIntervalSeconds: 3
+      maxResultPages: 200
+      llmEnhancement: true
+      enhancementMode: "VLM"
+      formulaEnhancement: true
+      outputHtmlTable: true
+      outputFormats: "markdown,visualLayoutInfo"
+  llm:
+    # OpenAI-compatible chat completions base URL。
+    # 必须与 Java 侧 app.ai.chat.base-url 指向同一网关，否则 GraphRAG 抽取与
+    # RAPTOR 摘要会与对话走不同配额。用 RAG_TOOLS_LLM_BASE_URL 覆盖。
+    baseUrl: "${RAG_TOOLS_LLM_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}"
+    # Supports Spring-style environment placeholders, for example ${ALI_BAI_LIAN_API_KEY}.
+    apiKey: "${ALI_BAI_LIAN_API_KEY}"
+    model: "qwen3.7-plus"
+    timeoutSeconds: 120
