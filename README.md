@@ -107,7 +107,7 @@ flowchart TB
 | --- | --- |
 | 后端 | Java 17 · Spring Boot 3.5.6 · MyBatis-Plus 3.5.7 · Redisson 3.32 · Knife4j 4.3 · Hutool · Reactor |
 | 检索与存储 | MySQL（44 张业务表）· PostgreSQL + pgvector（1024 维）· Elasticsearch 8.18 + IK · Neo4j 5.26 · Redis 7.4 · RabbitMQ 4.3 · MinIO |
-| 模型侧 | 对话 `qwen3.7-plus`（OpenAI 兼容网关）· 向量 `BAAI/bge-m3`(1024d) · 重排 `BAAI/bge-reranker-v2-m3` · 文档解析阿里云 DocMind + 本地兜底 · Tavily 联网检索 |
+| 模型侧 | 对话 `qwen3.7-plus` · 向量 `qwen3.7-text-embedding`(1024d) · 重排 `qwen3.7-text-rerank`（OpenAI 兼容网关 / 阿里云百炼）· 文档解析阿里云 DocMind + 本地兜底 · Tavily 联网检索 |
 | Python 工具箱 | Python 3.11 · FastAPI 0.115 · sentence-transformers · PyMuPDF · networkx |
 | 前端 | Vue 3.4 · Vite 6.1 · Tailwind CSS 4.3 · shadcn-vue / reka-ui · Cytoscape（图谱可视化）· marked + DOMPurify |
 | 测试 | JUnit 5 · pytest · Vitest 3.2 · Playwright 1.61（含 axe 无障碍断言） |
@@ -138,16 +138,21 @@ docker compose -f deploy/docker-compose.yml ps
 
 首次启动会自动执行 MySQL 建库建表与 Postgres 建表脚本（见 `deploy/docker-compose.yml` 的挂载项）。7 个服务的本机端口：MySQL **3307**、PostgreSQL **5432**、Redis **6381**、RabbitMQ **5672 / 15672**、Neo4j **7687 / 7474**、MinIO **9000 / 9001**、Elasticsearch **9201**。
 
-### 3. 启动 Python 算法服务
+### 3. 启动 Python 算法服务（解析 + 云端重排适配）
+
+向量化与重排默认走云端 API，**服务器不需要部署本地模型**（省掉约 5GB 依赖与 4-6GB 常驻内存）：
 
 ```bash
 cd smartledge-rag-tools
 uv venv --python 3.11 .venv
-uv pip install --python .venv/bin/python -r requirements.txt
+uv pip install --python .venv/bin/python -r requirements-cloud.txt   # 云端模式：不含 torch
 cd ..
 deploy/start-rag-tools.sh --daemon
-deploy/start-rag-tools.sh --status   # 应显示 credentialStatus=True
+deploy/start-rag-tools.sh --status
 ```
+
+若要在本地推理向量化与重排（离线环境或大内存机器），改用 `requirements.txt`，并把 `.env` 里的
+`SMARTLEDGE_EMBEDDING_PROVIDER` 设为 `rag-tools`、`RAG_TOOLS_RERANK_PROVIDER` 设为 `local`。
 
 ### 4. 构建并启动后端
 
@@ -210,6 +215,21 @@ npm run dev     # http://127.0.0.1:5174，已代理 /api、/admin/auth、/manage
 4. **引用绑定不做推断。** 显式引用绑定只解析答案中的合法 1-based ASCII `[n]` token，并且只能绑定同轮 Prompt manifest 中真实渲染（`PROMPT_RENDERED_SOURCE`）或复用（`PROMPT_REUSED_SOURCE`）的 Source；最终引用组必须是合格身份集合按首次出现顺序形成的有序子集。答案里没有合法 token 时引用数组必须为空 —— 不用相似度、NLI、词法规则或生成模型去猜测、修复、补充引用。
 5. **一个业务决定只有一个权威。** 租户过滤、知识范围、路由、通道、窗口、最终证据、citation 各自的权威实现只有一处；投影层可以转换协议与存储形状，但不能重新解释这些决定。
 
+## 高可用与降级
+
+外部模型是这套系统的强依赖，链路按"**瞬时故障重试、不可恢复失败显式降级、绝不伪造结果**"来设计：
+
+| 环节 | 机制 | 位置与配置 |
+| --- | --- | --- |
+| 对话 / 向量化（Java 直连云端） | 有界重试（默认 3 次，线性退避）+ 请求截止时间 + 响应体上限；只重试可恢复失败（超时、连接错误、429、5xx） | `ModelHttpClient#request`；`app.ai.retry.chat-max-attempts` / `embedding-max-attempts` |
+| 重排（Python 适配云端） | 进程内并发闸门（默认 4，防自造 429）+ 指数退避 + 随机抖动（默认 3 次） | `rag_tools/semantic_model.py`；`RAG_TOOLS_RERANK_MAX_CONCURRENCY` / `_MAX_ATTEMPTS` / `_BACKOFF_SECONDS` |
+| 重排整体失败 | **降级为融合序继续回答**，同时在证据 ledger 记 `RerankResultStatus.UNUSABLE` 与失败阶段；不伪造分数 | `RagRerankService` + `RagRetrievalEngine` |
+| 入口限流 | nginx 按 IP：对话 20 次/分钟、其他接口 300 次/分钟，公开演示不会被单 IP 刷爆 | `deploy/server/nginx-smartledge.conf` |
+| 任务级容错 | 索引任务失败可重投；RabbitMQ 发布方确认 + 定时对账纠正漏投 | `smartledge-knowledge-indexing` |
+| 健康检查 | `/actuator/health`（应用 + 数据库）、rag-tools `/health`（provider、重试与并发参数） | systemd 两个服务 + compose healthcheck |
+
+刻意**不做**的两件事：不缓存或复用旧向量、旧分数来掩盖失败；不用生成模型补答案之外的事实。这两种"降级"会让证据不可核验，违反引用不变量。
+
 ## 测试与质量门禁
 
 | 层 | 规模 | 命令 |
@@ -227,8 +247,8 @@ npm run dev     # http://127.0.0.1:5174，已代理 /api、/admin/auth、/manage
 
 ## 已知限制
 
-- **模型服务是外部依赖**：对话、GraphRAG 抽取与 RAPTOR 摘要都需要可用的 OpenAI 兼容网关与有效额度；凭据缺失时应用仍能启动，但相关功能会在调用时报错。
-- **首次索引有成本**：向量化与图谱构建依赖本地模型推理，首次全量索引耗时与机器性能强相关；`HF_HUB_OFFLINE=1` 时需预先下载模型到本机缓存。
+- **模型服务是外部依赖**：对话、向量化、重排、GraphRAG 抽取与 RAPTOR 摘要都依赖可用的 OpenAI 兼容网关与有效额度；凭据缺失时应用仍能启动，相关调用会走上表的重试与降级策略。
+- **首次索引有云端成本**：向量化与重排默认走云端 API，首次全量索引会消耗额度、产生少量费用；改用本地推理可避免 API 成本，但需要相应内存与算力。
 - **评测以离线与人工为主**：仓库内提供观测表与只读探针，但没有内置的在线 A/B 或端到端评分平台；模型理解、重排与答案生成存在波动，链路合法性由确定性断言保护，回答质量仍需人工评估。
 - **单节点部署形态**：`deploy/docker-compose.yml` 面向本机开发与演示，未提供 K8s/Helm、网关与注册中心编排。
 

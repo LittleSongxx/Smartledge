@@ -24,3 +24,23 @@ ragTools:
     apiKey: "${ALI_BAI_LIAN_API_KEY}"
     model: "qwen3.7-plus"
     timeoutSeconds: 120
+  rerank:
+    # 重排 provider：
+    #   local     = 本地 cross-encoder（bge-reranker-v2-m3），需要 torch/sentence-transformers；
+    #   dashscope = 阿里云百炼云端重排（gte-rerank-v2），无需本地模型，适合 CPU-only 部署。
+    # 两种 provider 的输入输出契约一致（与输入等长、归一化到 [0,1] 的分数），
+    # Java 侧的窗口排序与预算逻辑不感知差异，切换只影响分数来源。
+    provider: "${RAG_TOOLS_RERANK_PROVIDER:local}"
+    # 可用性参数（两种 provider 都生效，仅 dashscope 会真正发起远端调用）：
+    #   maxConcurrency  进程内并发闸门，批量重排时防止自造 429；
+    #   maxAttempts     可重试错误（429/5xx/超时/网络抖动）的最大尝试次数；
+    #   backoffSeconds  退避基数，实际等待为 base * 2^(n-1) 再加 0~25% 抖动。
+    maxConcurrency: "${RAG_TOOLS_RERANK_MAX_CONCURRENCY:4}"
+    maxAttempts: "${RAG_TOOLS_RERANK_MAX_ATTEMPTS:3}"
+    backoffSeconds: "${RAG_TOOLS_RERANK_BACKOFF_SECONDS:0.8}"
+    dashscope:
+      model: "${RAG_TOOLS_RERANK_DASHSCOPE_MODEL:gte-rerank-v2}"
+      url: "${RAG_TOOLS_RERANK_DASHSCOPE_URL:https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank}"
+      # 留空时回落到 ALI_BAI_LIAN_API_KEY，与 Java 侧共用同一个百炼密钥。
+      apiKey: "${ALI_BAI_LIAN_API_KEY:}"
+      timeoutSeconds: 30

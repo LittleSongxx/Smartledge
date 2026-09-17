@@ -30,7 +30,7 @@ public class AiModelConfiguration {
             chat.getExtensions(), chat.getThinkingField(), properties.getEmbedding().getDimensions(),
             transport.getConnectTimeout(), transport.getRequestTimeout(), transport.getReadIdleTimeout(),
             transport.getMaxResponseBytes(), transport.getMaxToolArgumentBytes(), retry.getChatMaxAttempts(),
-            retry.getBackoff(), transport.getWorkerThreads()), mapper);
+            retry.getEmbeddingMaxAttempts(), retry.getBackoff(), transport.getWorkerThreads()), mapper);
     }
     @Bean ChatModelPort chatModelPort(ModelHttpClient client) { return client.chat(); }
 

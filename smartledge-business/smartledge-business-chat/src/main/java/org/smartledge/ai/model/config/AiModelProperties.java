@@ -68,6 +68,14 @@ public class AiModelProperties {
     @Getter @Setter
     public static class Retry {
         private int chatMaxAttempts = 3;
+        /**
+         * 向量化请求的最大尝试次数。
+         *
+         * <p>云端向量化按批调用远端接口，单批遇到 429/5xx/超时属于瞬时故障；
+         * 只试一次会让整篇文档的索引任务失败并等待重投。这里与对话路径一致地做有界重试，
+         * 退避与截止时间由 ModelHttpClient 统一控制（线性退避，且不得越过请求截止时间）。</p>
+         */
+        private int embeddingMaxAttempts = 3;
         private Duration backoff = Duration.ofMillis(1200);
     }
 }

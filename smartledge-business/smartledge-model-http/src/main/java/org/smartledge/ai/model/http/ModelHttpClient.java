@@ -163,8 +163,9 @@ public final class ModelHttpClient implements AutoCloseable {
             throw new IllegalArgumentException("Embedding requires non-null input texts");
         }
         // Dimensions are a validation contract. Do not change the provider's existing default output dimensions.
+        // 云端向量化按批调用远端接口：瞬时 429/5xx/超时做有界重试，避免单批抖动拖垮整篇文档的索引任务。
         JsonNode json = request(settings.embedding(), Map.of("model", settings.embedding().model(), "input", List.copyOf(texts),
-            "encoding_format", "float"), 1, "embedding");
+            "encoding_format", "float"), settings.embeddingMaxAttempts(), "embedding");
         JsonNode data = json.get("data");
         if (data == null || !data.isArray() || data.size() != texts.size()) { throw failure(INVALID_RESPONSE, 200, "embedding"); }
         float[][] ordered = new float[texts.size()][];

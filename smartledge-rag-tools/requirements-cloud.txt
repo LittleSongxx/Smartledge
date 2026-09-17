@@ -1,0 +1,21 @@
+# 云端模型模式的依赖清单（无 torch / sentence-transformers）。
+#
+# 适用场景：CPU-only 服务器，或希望向量化与重排走云端 API 的部署。
+# 与 requirements.txt 的差异：去掉 sentence-transformers 与 tokenizers（仅本地推理需要）。
+#
+# 配套配置：
+#   Java 侧向量化 —— application.yaml 的 app.ai.embedding.provider=openai-compatible
+#                    （或 .env 里设 SMARTLEDGE_EMBEDDING_PROVIDER=openai-compatible）
+#   本服务重排   —— RAG_TOOLS_RERANK_PROVIDER=dashscope
+#
+# 安装：uv pip install --python .venv/bin/python -r requirements-cloud.txt
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+# GraphRAG 候选抽取用它做字节级 token 估算（纯本地估算器，不下载模型资产）。
+tokenizers>=0.21,<0.23
+networkx==3.6.1
+markdown-it-py==3.0.0
+alibabacloud-docmind-api20220711==1.4.14
+alibabacloud-credentials==1.0.9
+PyMuPDF==1.24.14
+Pillow==12.2.0

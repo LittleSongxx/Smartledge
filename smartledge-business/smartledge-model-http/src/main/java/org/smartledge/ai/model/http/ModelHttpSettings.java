@@ -12,13 +12,15 @@ public record ModelHttpSettings(Endpoint chat, Endpoint embedding, ChatCallOptio
                                 Map<String, Object> chatExtensions, String thinkingField,
                                 int embeddingDimensions, Duration connectTimeout, Duration requestTimeout,
                                 Duration readIdleTimeout, int maxResponseBytes, int maxToolArgumentBytes,
-                                int chatMaxAttempts, Duration retryBackoff, int workerThreads) {
+                                int chatMaxAttempts, int embeddingMaxAttempts, Duration retryBackoff, int workerThreads) {
     private static final Set<String> RESERVED = Set.of("model", "messages", "stream", "stream_options", "tools",
         "tool_choice", "max_tokens", "temperature", "top_p", "reasoning_effort", "verbosity");
     public ModelHttpSettings {
         if (chat == null || embedding == null || defaults == null || embeddingDimensions < 1
             || maxResponseBytes < 1 || maxToolArgumentBytes < 1 || maxToolArgumentBytes > maxResponseBytes
-            || chatMaxAttempts < 1 || chatMaxAttempts > 5 || workerThreads < 1 || workerThreads > 32) {
+            || chatMaxAttempts < 1 || chatMaxAttempts > 5
+            || embeddingMaxAttempts < 1 || embeddingMaxAttempts > 5
+            || workerThreads < 1 || workerThreads > 32) {
             throw new IllegalArgumentException("Invalid model transport limits");
         }
         positive(connectTimeout); positive(requestTimeout); positive(readIdleTimeout); positive(retryBackoff);

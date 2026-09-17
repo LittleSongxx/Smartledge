@@ -115,6 +115,10 @@ app:
     #   4. 消息消费线程与对账任务：入口方法自身声明系统上下文（含死信处理）。
     # 传播原语只有 TenantContext 一处实现，不跨模块各自发明。
     enforcement-enabled: true
+  admin-auth:
+    # JWT 签名密钥只来自本地/环境变量，不能经系统参数页改写。
+    token-secret: ${SMARTLEDGE_ADMIN_TOKEN_SECRET:}
+    token-expire-minutes: ${SMARTLEDGE_ADMIN_TOKEN_EXPIRE_MINUTES:720}
   # 生产 Chat、Agent 与 Embedding 的唯一模型配置。
   ai:
     chat:
@@ -132,16 +136,18 @@ app:
       thinking-field: enable_thinking
     embedding:
       # 向量化实现：rag-tools（本地 Python 推理，BAAI/bge-m3）/ openai-compatible（远端兼容接口）。
-      provider: rag-tools
+      # 云端模式下不需要本地模型：在 .env 里设置 SMARTLEDGE_EMBEDDING_PROVIDER=openai-compatible，
+      # 并按需覆盖 model（例如阿里云百炼 text-embedding-v4）。
+      provider: ${SMARTLEDGE_EMBEDDING_PROVIDER:rag-tools}
       # provider=openai-compatible 时是真实调用目标；provider=rag-tools 时下面的 model 只作为
       # embedding_model 标签的兜底值，实际标签以 Python 服务在 /embed 响应中声明的模型名为准。
-      base-url: https://dashscope.aliyuncs.com/compatible-mode/
-      path: v1/embeddings
-      api-key: ${ALI_BAI_LIAN_API_KEY}
-      model: BAAI/bge-m3
+      base-url: ${SMARTLEDGE_EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/}
+      path: ${SMARTLEDGE_EMBEDDING_PATH:v1/embeddings}
+      api-key: ${SMARTLEDGE_EMBEDDING_API_KEY:${ALI_BAI_LIAN_API_KEY}}
+      model: ${SMARTLEDGE_EMBEDDING_MODEL:BAAI/bge-m3}
       # 维度是跨语言契约：Java 严格校验返回维度，pgvector 列也已归一化为 vector(1024)。
-      # 换成本地模型时该值必须与模型输出一致，bge-m3 与 Qwen3-Embedding-0.6B 都是 1024。
-      dimensions: 1024
+      # 换模型时该值必须与模型输出一致：bge-m3 与 text-embedding-v4 的 1024 档都是 1024。
+      dimensions: ${SMARTLEDGE_EMBEDDING_DIMENSIONS:1024}
     transport:
       connect-timeout: 10s
       request-timeout: 120s
@@ -151,6 +157,9 @@ app:
       worker-threads: 8
     retry:
       chat-max-attempts: 3
+      # 向量化请求的重试次数。云端向量化按批调用远端接口，瞬时 429/5xx/超时会
+      # 影响整篇文档的索引任务，因此与对话路径一致地做有界重试（线性退避）。
+      embedding-max-attempts: 3
       backoff: 1200ms
   tavily:
     # 是否启用 Tavily 联网搜索工具。

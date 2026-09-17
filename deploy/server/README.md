@@ -44,17 +44,31 @@ docker exec smartledge-mysql mysql -uroot -p"$SMARTLEDGE_MYSQL_PASSWORD" -e \
 
 ## 4. Python 算法服务
 
-需要 Python 3.11 与 `uv`：
+默认云端模式：向量化与重排走云端 API，因此**不需要本地模型**（省约 5GB 依赖与 4-6GB 常驻内存），
+依赖清单用 `requirements-cloud.txt`。需要 Python 3.11 与 `uv`：
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 cd /srv/smartledge/app/smartledge-rag-tools
 uv venv --python 3.11 .venv
-uv pip install --python .venv/bin/python -r requirements.txt
+uv pip install --python .venv/bin/python -r requirements-cloud.txt
 ```
 
-模型为懒加载，首次请求时会从 HuggingFace 下载（约 4.6 GB：`BAAI/bge-m3` 与 `BAAI/bge-reranker-v2-m3`）。
-国内/离线环境可先设置 `HF_ENDPOINT=https://hf-mirror.com`，或把本机 `~/.cache/huggingface` 上传到服务器同一路径。
+### 4.1 必须核对 `ragTools.baseUrl`
+
+Java 调用 Python 服务的地址存在**数据库系统配置**里（不是 yaml/env），种子值为 `http://127.0.0.1:18080`，
+与 `.env` 的 `RAG_TOOLS_PORT`（18089）不一致时解析会失败并报 `status=n/a`。部署后执行：
+
+```bash
+# 查：管理台 -> 系统配置 -> RAG 工具服务地址；或直接查库
+# 改：管理台把地址改为 http://127.0.0.1:18089，保存后重启后端（该键标记为 RESTART_REQUIRED）
+```
+
+### 4.2 本地模型模式（可选）
+
+改用 `requirements.txt`，设置 `SMARTLEDGE_EMBEDDING_PROVIDER=rag-tools` 与 `RAG_TOOLS_RERANK_PROVIDER=local`。
+模型为懒加载，首次请求会从 HuggingFace 下载（约 4.6GB：`BAAI/bge-m3` 与 `BAAI/bge-reranker-v2-m3`）。
+国内/离线环境可设置 `HF_ENDPOINT=https://hf-mirror.com`，或把本机 `~/.cache/huggingface` 上传到同一路径。
 
 ## 5. 服务化
 
