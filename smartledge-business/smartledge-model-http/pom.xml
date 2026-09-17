@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.smartledge</groupId>
+        <artifactId>smartledge-business</artifactId>
+        <version>${revision}</version>
+    </parent>
+
+    <artifactId>smartledge-model-http</artifactId>
+    <name>smartledge-model-http</name>
+    <description>同步、流式模型与 Embedding HTTP 协议、校验和资源生命周期</description>
+
+    <dependencies>
+        <dependency><groupId>io.projectreactor</groupId><artifactId>reactor-core</artifactId></dependency>
+        <dependency><groupId>org.smartledge</groupId><artifactId>smartledge-rag-runtime</artifactId><version>${revision}</version></dependency>
+        <dependency><groupId>com.fasterxml.jackson.core</groupId><artifactId>jackson-databind</artifactId></dependency>
+        <dependency><groupId>org.smartledge</groupId><artifactId>smartledge-knowledge-indexing</artifactId><version>${revision}</version></dependency>
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope>
+            <exclusions><exclusion><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-logging</artifactId></exclusion></exclusions>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <parameters>true</parameters>
+                </configuration>
+            </plugin>
+            <plugin>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.2</version>
+            </plugin>
+        </plugins>
+    </build>
+</project>
