@@ -1,0 +1,322 @@
+server:
+  # 业务聊天服务的 HTTP 监听端口。
+  port: 9083
+  servlet:
+    encoding:
+      # HTTP 请求与响应默认使用的字符编码。
+      charset: UTF-8
+      # 是否启用 Servlet 字符编码过滤器。
+      enabled: true
+      # 是否强制请求与响应使用上述字符编码。
+      force: true
+prefix:
+  distinction:
+    # 项目资源命名前缀，供应用名称、存储桶和索引名称等配置引用。
+    name: smartledge
+spring:
+  config:
+    # 从仓库根目录启动时读取仓库根的 .env（模型密钥、对象存储与数据库口令）。
+    # .env 用 KEY=value 单行格式，因此这里按 properties 解析；optional 前缀保证
+    # 文件缺失时不影响启动（缺凭据只会在真正调用模型时报错）。
+    import: optional:file:./.env[.properties]
+  application:
+    # Spring 应用名称，用于日志、监控等场景标识当前服务。
+    name: ${prefix.distinction.name:smartledge}-business-chat
+  data:
+    redis:
+      # Redis 逻辑数据库编号，从 0 开始。
+      database: 0
+      # Redis 服务主机地址。
+      host: 127.0.0.1
+      # Redis 服务端口；本地依赖栈映射为 6381。
+      port: 6381
+      # Redis 访问密码。
+      password: ${SMARTLEDGE_REDIS_PASSWORD:smartledge}
+      # Redis 操作超时时间，单位：毫秒。
+      timeout: 3000  
+  datasource:
+    # 业务 MySQL 数据库的 JDBC 连接地址及连接参数。
+    url: jdbc:mysql://127.0.0.1:3307/smartledge?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+    # 业务 MySQL 数据库的连接用户名。
+    username: root
+    # 业务 MySQL 数据库的连接密码。
+    password: ${SMARTLEDGE_MYSQL_PASSWORD:smartledge}
+    # 业务 MySQL 数据源使用的 JDBC 驱动类。
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      # 业务 MySQL 连接池名称，用于日志和监控定位。
+      pool-name: smartledge-hikari
+      # 最大连接数。原值 200 与 minimum-idle 100 是配置倒挂：
+      # MySQL 默认 max_connections=151，两个实例就会把服务端连接耗尽
+      # （实测触发过 ERROR 1040 Too many connections，连 root 都无法登录）。
+      # 连接池上限必须显著小于服务端上限，且按实际并发而不是"越大越好"来设。
+      maximum-pool-size: 20
+      # 最小空闲连接数：保持少量常驻即可，避免启动瞬间抢占上百条连接。
+      minimum-idle: 5
+      # 获取连接的超时时间：默认 30 秒会让请求静默挂住，缩短以快速失败。
+      connection-timeout: 10000
+      # 连接空闲多久后回收，避免长期占用服务端连接额度。
+      idle-timeout: 300000
+      # 连接最长存活时间，小于 MySQL 的 wait_timeout，防止使用到已被服务端关闭的连接。
+      max-lifetime: 1200000
+  rabbitmq:
+    # RabbitMQ 服务地址与端口；本地依赖栈见 deploy/docker-compose.yml。
+    host: 127.0.0.1
+    port: 5672
+    username: ${SMARTLEDGE_RABBITMQ_USER:smartledge}
+    password: ${SMARTLEDGE_RABBITMQ_PASSWORD:smartledge}
+    virtual-host: /
+    connection-timeout: 10s
+    # 开启发布方确认与不可路由回退，DocumentMessagePublisher 依赖两者判断投递是否真正成功。
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+      # 投递失败由 DocumentMessagePublisher 同步判定并转成业务异常，这里不做隐式重试。
+      retry:
+        enabled: false
+    # 监听容器的重试、并发与拒绝策略由 DocumentMessagingConfiguration 中的
+    # rabbitListenerContainerFactory 唯一声明，配置文件不再重复设置。
+  main:
+    # 是否允许后注册的同名 Bean 定义覆盖已有定义。
+    allow-bean-definition-overriding: true
+  mvc:
+    pathmatch:
+      # Spring MVC 路径匹配策略，此处使用 Ant 风格匹配器。
+      matching-strategy: ant_path_matcher
+    servlet:
+      # DispatcherServlet 的启动加载顺序；非负值表示启动时初始化。
+      load-on-startup: 1
+  jackson:
+    # Jackson 日期序列化与反序列化使用的默认时区。
+    time-zone: GMT+8
+    # Jackson 传统日期类型的默认格式；Java 时间类型仍可能由各自模块或字段注解控制。
+    date-format: yyyy-MM-dd HH:mm:ss
+mybatis-plus:
+  # MyBatis Mapper XML 文件的类路径扫描位置。
+  mapper-locations: classpath:mapper/*.xml
+  configuration:
+#    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    # MyBatis 一级缓存作用域；statement 表示仅在单条语句执行期间使用缓存。
+    local-cache-scope: statement  
+
+app:
+  tenant:
+    # 租户 SQL 重写开关。关闭时业务查询不带租户条件，等同单租户语义。
+    #
+    # 开启前提（S21 步骤 1 已补齐）：租户上下文是 ThreadLocal，不跨线程传播，
+    # 因此四个异步边界都必须显式携带上下文，否则下游查询会因缺少上下文 fail closed：
+    #   1. Reactor boundedElastic：入口把租户固化进 TaskInfo，各跳转点用
+    #      TenantContext.callWith/runWith 恢复；追踪记录器自己负责写入前后的作用域。
+    #   2. chat-rag-executor / chat-post-process / chat-memory-summary 线程池：
+    #      建池时用 TenantContext.propagating 装饰，提交点捕获、任务内恢复。
+    #   3. 索引构建线程池与构建链路内部池（向量化批次、关键词增强、GraphRAG 批次）：
+    #      同上；后台任务仍显式声明 TenantContext.setSystem()。
+    #   4. 消息消费线程与对账任务：入口方法自身声明系统上下文（含死信处理）。
+    # 传播原语只有 TenantContext 一处实现，不跨模块各自发明。
+    enforcement-enabled: true
+  # 生产 Chat、Agent 与 Embedding 的唯一模型配置。
+  ai:
+    chat:
+      # OpenAI 兼容对话端点。默认走公共 compatible-mode；使用百炼专属网关或自建
+      # 兼容服务时，在 .env 里设置 SMARTLEDGE_CHAT_BASE_URL 覆盖即可，无需改代码。
+      base-url: ${SMARTLEDGE_CHAT_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/}
+      path: v1/chat/completions
+      api-key: ${ALI_BAI_LIAN_API_KEY}
+      model: qwen3.7-plus
+      temperature: 0.5
+      max-tokens: 5000
+      # qwen3 系列的思考开关字段名。该字段是请求参数名，不是响应字段：
+      # 网关只接受 enable_thinking，传 thinking 会被 400 拒绝（'thinking' must be json_object）。
+      # 响应侧的思考内容固定在 reasoning_content，由 ChatSseDecoder 解析，与此处无关。
+      thinking-field: enable_thinking
+    embedding:
+      # 向量化实现：rag-tools（本地 Python 推理，BAAI/bge-m3）/ openai-compatible（远端兼容接口）。
+      provider: rag-tools
+      # provider=openai-compatible 时是真实调用目标；provider=rag-tools 时下面的 model 只作为
+      # embedding_model 标签的兜底值，实际标签以 Python 服务在 /embed 响应中声明的模型名为准。
+      base-url: https://dashscope.aliyuncs.com/compatible-mode/
+      path: v1/embeddings
+      api-key: ${ALI_BAI_LIAN_API_KEY}
+      model: BAAI/bge-m3
+      # 维度是跨语言契约：Java 严格校验返回维度，pgvector 列也已归一化为 vector(1024)。
+      # 换成本地模型时该值必须与模型输出一致，bge-m3 与 Qwen3-Embedding-0.6B 都是 1024。
+      dimensions: 1024
+    transport:
+      connect-timeout: 10s
+      request-timeout: 120s
+      read-idle-timeout: 30s
+      max-response-bytes: 8388608
+      max-tool-argument-bytes: 65536
+      worker-threads: 8
+    retry:
+      chat-max-attempts: 3
+      backoff: 1200ms
+  tavily:
+    # 是否启用 Tavily 联网搜索工具。
+    # 关闭后，Agent 即使判断需要搜索，也无法调用该工具。
+    enabled: true
+    # Tavily API 的服务地址。
+    # 如果后续切换代理或企业网关，可以改这里。
+    base-url: https://api.tavily.com
+    # Tavily 搜索接口路径。
+    # 默认使用官方的 /search 端点。
+    search-path: /search
+    # Tavily 的 API Key。
+    # 推荐通过环境变量注入，避免把真实密钥写进配置文件。
+    api-key: ${TAVILY_API_KEY}
+    # 搜索主题类型。
+    # Tavily 当前只接受 general、news、finance 三个枚举值。
+    # 一般场景优先用 general。
+    topic: general
+    # 搜索深度。
+    # advanced 会更重一些，但通常能拿到更完整的搜索结果。
+    search-depth: advanced
+    # 单次搜索最多返回多少条候选结果。
+    # 结果越多，引用来源越全，但也会增加模型处理成本。
+    max-results: 5
+    # 是否让 Tavily 在结果中返回它生成的 answer 摘要。
+    # 当前我们主要使用 results 里的来源信息，但 answer 也会被工具结果带回模型。
+    include-answer: true
+    # 是否返回网页原始全文内容。
+    # 默认关闭，避免响应过大；如果后续需要做更深的抽取分析，可以再打开。
+    include-raw-content: false
+
+  manage:
+    minio:
+      # MinIO 服务地址。
+      # 上传的原始文件和解析后的纯文本都会放在这里。
+      # 本地一般是 9000 端口；如果你是 docker 启动的 MinIO，这里填宿主机映射地址。
+      endpoint: http://127.0.0.1:9000
+      # MinIO 访问账号。
+      # 本地依赖栈默认账号，生产环境必须通过环境变量注入专用 AK。
+      access-key: ${SMARTLEDGE_MINIO_USER:smartledge}
+      # MinIO 访问密码。
+      # 生产环境不要直接写死在配置文件里，建议通过环境变量或配置中心下发。
+      secret-key: ${SMARTLEDGE_MINIO_PASSWORD:smartledge123}
+      # 文档管理模块统一使用的 bucket 名称。
+      # 应用启动时会自动检查这个 bucket 是否存在，不存在就自动创建。
+      bucket-name: ${prefix.distinction.name:smartledge}-document
+      # 原始文件对象前缀。
+      # 最终对象路径一般会在这个前缀下再拼接文档 id 和文件名。
+      object-prefix: rag/document
+      # 解析后纯文本副产物对象前缀。
+      # 当前解析主链路由 Python /document/parse 产出结构化 blocks；纯文本只作为解析产物和概要生成辅助，不再作为切块主输入。
+      parsed-text-prefix: rag/parsed-text
+      # 结构化解析产物对象前缀。
+      # Python parser 后续生成的 Markdown、JSON、页面图片、表格图片、OCR JSON 都放在这个前缀下。
+      parse-artifact-prefix: rag/parse-artifact
+    messaging:
+      # 资源名前缀。只在这里出现一次，由 DocumentMessagingTopology 统一拼接，
+      # 生产者、消费者、队列与交换机声明都取自同一解析结果。
+      resource-prefix: ${prefix.distinction.name:smartledge}
+      # 等待 broker publisher confirm 的超时时间，单位毫秒。
+      publish-confirm-timeout-millis: 5000
+      # 单条消息进入死信队列前的消费尝试次数与退避策略。
+      max-attempts: 3
+      retry-initial-interval-millis: 2000
+      retry-multiplier: 2.0
+      retry-max-interval-millis: 30000
+      reconcile:
+        # 对账任务：补投丢失的触发消息、判定失联任务、释放卡住的文档状态。
+        enabled: true
+        interval-millis: 60000
+        dispatch-grace-millis: 120000
+        # 失联判定窗口：任务卡死后由对账判失败并释放文档（默认 2 小时）。
+        stale-task-timeout-millis: 7200000
+        batch-size: 200
+        max-redispatch-attempts: 5
+    pgvector:
+      # 是否启用 PGVector 向量写入。
+      # 关闭后，向量化链路不会创建 PG 专用数据源。
+      enabled: true
+      # PostgreSQL 主机地址。
+      host: 127.0.0.1
+      # PostgreSQL 端口。
+      port: 5432
+      # PGVector 使用的数据库名。
+      database: smartledge_pgvector
+      # 默认 schema。
+      schema: public
+      # PostgreSQL 用户名。
+      #
+      # 必须是**非超级用户**：超级用户（postgres）绕过 RLS，用它连库时向量表的租户策略等于不存在。
+      # 角色、授权与策略启用见 sql/表结构/迁移/S21-向量表租户化-PostgresSql.sql 末尾的「启用 RLS」。
+      username: smartledge_app
+      # PostgreSQL 密码（本地默认与其它开发口令一致；生产必须只从环境变量注入强口令）。
+      password: ${SMARTLEDGE_PG_APP_PASSWORD:smartledge}
+      # 连接池名称，方便日志和监控定位。
+      pool-name: smartledge-manage-pgvector-hikari
+      # 连接池最大连接数。
+      maximum-pool-size: 5
+      # 连接池最小空闲连接数。
+      minimum-idle: 1
+    elasticsearch:
+      # 是否启用 Elasticsearch 关键词检索。
+      enabled: true
+      # Elasticsearch 地址列表。
+      uris:
+        - http://127.0.0.1:9201
+      # Elasticsearch 用户名。
+      username: elastic
+      # Elasticsearch 密码。
+      password: ${ELASTICSEARCH_PASSWORD:elastic}
+      # 关键词索引名称。
+      index-name: ${prefix.distinction.name:smartledge}-document-keyword
+      # 导航层结构节点索引名称，粒度是 section/step/list_item，不和 chunk 级关键词索引混用。
+      navigation-index-name: ${prefix.distinction.name:smartledge}-document-navigation
+      # 知识路由索引名称，粒度是 scope/topic/document 路由元数据，不和正文索引混用。
+      route-index-name: ${prefix.distinction.name:smartledge}-knowledge-route
+      # 建索引 analyzer。
+      # 如果使用 IK analyzer，本地 Elasticsearch 必须安装 IK 插件；配置错误会直接启动失败。
+      analyzer: ik_max_word
+      # 搜索 analyzer。
+      search-analyzer: ik_smart
+      # 连接超时，毫秒。
+      connect-timeout-millis: 3000
+      # 读超时，毫秒。
+      socket-timeout-millis: 5000
+    neo4j:
+      # 是否启用 Neo4j 结构图投影查询。MySQL 结构节点表始终是权威结构数据源；Neo4j 用于结构导航加速和图查询展示。
+      enabled: true
+      # Neo4j 连接地址，包含协议、主机及 Bolt 端口。
+      uri: bolt://127.0.0.1:7687
+      # Neo4j 数据库连接用户名。
+      username: neo4j
+      # Neo4j 数据库连接密码。
+      password: ${NEO4J_PASSWORD:smartledge2026}
+      # Neo4j 连接后使用的数据库名称。
+      database: neo4j
+      # Cypher 语句的事务超时时间，单位：秒。
+      query-timeout-seconds: 5
+
+logging:
+  level:
+    # 项目聊天与 RAG 运行时模块的日志级别。
+    org.smartledge.ai.chatagent: INFO
+    # 项目文档管理、解析和索引构建模块的日志级别。
+    org.smartledge.ai.manage: INFO
+
+management:
+  metrics:
+    tags:
+      # 为监控指标附加的应用名称标签，便于按服务筛选指标。
+      application: smartledge
+  endpoint:
+    health:
+      # 健康检查详情的展示策略，always 表示始终展示详情。
+      show-details: always
+  endpoints:
+    web:
+      exposure:
+        # 允许通过 HTTP 暴露的 Actuator 端点；星号表示包含所有可用端点。
+        include: '*'
+  health:
+    elasticsearch:
+      # 是否把 Elasticsearch 健康检查纳入 Actuator 聚合健康状态；不控制关键词检索开关。
+      enabled: false
+  prometheus:
+    metrics:
+      export:
+        # 是否启用 Micrometer 的 Prometheus 指标导出。
+        enabled: true
