@@ -1,0 +1,23 @@
+[Unit]
+Description=Smartledge business chat (Spring Boot RAG 主链路)
+Documentation=https://github.com/LittleSongxx/Smartledge
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+# 必须从仓库根目录启动：application.yaml 通过 spring.config.import 读根目录 .env
+WorkingDirectory=/srv/smartledge/app
+EnvironmentFile=-/srv/smartledge/app/.env
+Environment=JAVA_OPTS=-Xms768m -Xmx1536m -XX:MaxMetaspaceSize=320m -XX:+UseG1GC -Dfile.encoding=UTF-8
+ExecStart=/usr/bin/java $JAVA_OPTS -jar /srv/smartledge/release/smartledge-business-chat.jar
+Restart=always
+RestartSec=10
+SuccessExitStatus=143
+TimeoutStopSec=60
+StandardOutput=append:/srv/smartledge/logs/app.out.log
+StandardError=append:/srv/smartledge/logs/app.err.log
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

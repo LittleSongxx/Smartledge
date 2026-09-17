@@ -1,0 +1,9 @@
+# MySQL 客户端字符集（只影响客户端，不影响服务端）。
+#
+# 为什么需要：容器初始化时由 mysql 命令行客户端执行 sql/ 下的脚本，
+# 客户端默认字符集不是 utf8mb4 时，脚本里的中文会按另一种编码解释后二次编码入库
+# （典型现象：租户名「默认租户」变成「é»˜è®¤ç§Ÿæˆ·」）。
+# 这里显式声明 [client] 段，保证初始化脚本里的中文按 utf8mb4 写入。
+# 服务端字符集仍由 docker-compose.yml 的 --character-set-server 控制。
+[client]
+default-character-set=utf8mb4

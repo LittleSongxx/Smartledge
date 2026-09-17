@@ -1,0 +1,1 @@
+CREATE DATABASE smartledge_pgvector WITH ENCODING 'UTF8';

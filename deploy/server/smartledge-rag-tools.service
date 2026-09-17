@@ -1,0 +1,23 @@
+[Unit]
+Description=Smartledge rag-tools (Python 算法工具箱：解析 / 向量化 / 重排 / GraphRAG 抽取 / RAPTOR 构建)
+Documentation=https://github.com/LittleSongxx/Smartledge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/srv/smartledge/app/smartledge-rag-tools
+# 凭据与模型配置统一来自仓库根 .env，与 Java 侧同一份来源。
+EnvironmentFile=-/srv/smartledge/app/.env
+Environment=PYTHONUNBUFFERED=1 TOKENIZERS_PARALLELISM=false
+ExecStart=/srv/smartledge/app/smartledge-rag-tools/.venv/bin/python -m uvicorn rag_tools.main:app --host 127.0.0.1 --port 18089
+Restart=always
+RestartSec=10
+SuccessExitStatus=143
+# 模型为懒加载：首次向量化/重排请求才把权重读进内存，启动阶段不占用 4GB+ 常驻内存。
+TimeoutStopSec=60
+StandardOutput=append:/srv/smartledge/logs/ragtools.out.log
+StandardError=append:/srv/smartledge/logs/ragtools.err.log
+
+[Install]
+WantedBy=multi-user.target

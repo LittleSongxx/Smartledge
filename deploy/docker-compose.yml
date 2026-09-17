@@ -1,0 +1,212 @@
+# Smartledge 依赖栈（可移植版）。
+#
+# 与 docker-compose.local.yml 的区别：本文件只使用公开镜像，任何机器都能直接拉起；
+# 本地开发若复用私有基础镜像，请用 docker-compose.local.yml。
+#
+# 启动：cp .env.example .env && docker compose --env-file .env -f deploy/docker-compose.yml up -d
+# 停止：docker compose -f deploy/docker-compose.yml down
+# 重置：docker compose -f deploy/docker-compose.yml down -v
+#
+# 端口分配（与 application.yaml 一致，仅监听本机回环）：
+#   MySQL 3307 / PostgreSQL 5432 / Redis 6381 / RabbitMQ 5672+15672
+#   Neo4j 7687+7474 / MinIO 9000+9001 / Elasticsearch 9201
+#
+# MySQL 初始化脚本按挂载文件名排序执行，下面的 01-08 就是全新部署的完整顺序：
+#   01 建库 -> 02 建表 -> 03 系统配置快照 -> 04 S19 索引
+#   -> 05 S21 多租户与 RBAC -> 06 S21-B3 认证与授权 -> 07/08 租户 B 演示夹具
+
+name: smartledge
+
+services:
+
+  mysql:
+    image: mysql:8.0.36
+    container_name: smartledge-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${SMARTLEDGE_MYSQL_PASSWORD:-smartledge}
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:3307:3306"
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --innodb-buffer-pool-size=256M
+    volumes:
+      # 单一权威：直接挂载仓库内 sql/ 下的原始文件，不复制副本。
+      # MySQL 官方镜像按文件名字典序执行 /docker-entrypoint-initdb.d 下的脚本。
+      - ../sql/表结构/Mysql/create_database_mysql.sql:/docker-entrypoint-initdb.d/01-create-database.sql:ro
+      - ../sql/表结构/Mysql/create_table_mysql.sql:/docker-entrypoint-initdb.d/02-create-table.sql:ro
+      - ../sql/表数据/Mysql/init_system_config.sql:/docker-entrypoint-initdb.d/03-init-system-config.sql:ro
+      - ../sql/表结构/迁移/S19-附加索引-Mysql.sql:/docker-entrypoint-initdb.d/04-s19-indexes.sql:ro
+      - ../sql/表结构/迁移/S21-多租户与RBAC-Mysql.sql:/docker-entrypoint-initdb.d/05-s21-rbac.sql:ro
+      - ../sql/表结构/迁移/S21-B3-认证与授权-Mysql.sql:/docker-entrypoint-initdb.d/06-s21-b3-auth.sql:ro
+      - ../sql/表数据/Mysql/S22-租户B管理员账号.sql:/docker-entrypoint-initdb.d/07-tenant-b-admin.sql:ro
+      - ../sql/表数据/Mysql/S23-租户B知识库管理员角色.sql:/docker-entrypoint-initdb.d/08-tenant-b-curator.sql:ro
+      # 09/10 是中文双重编码的自愈步骤：上面的 [client] 字符集配置已经消除根因，
+      # 这两个脚本带字节级守卫、只会改动"仍是乱码"的行，对干净数据是空操作，
+      # 因此保留为最后一步以防初始化路径在其它环境仍使用非 utf8mb4 客户端。
+      - ../sql/表数据/Mysql/S22-修复CLI写入的中文乱码.sql:/docker-entrypoint-initdb.d/09-fix-mojibake.sql:ro
+      - ../sql/表数据/Mysql/S23-补修S22漏掉的乱码列.sql:/docker-entrypoint-initdb.d/10-fix-mojibake-more.sql:ro
+      - ./mysql-client-charset.cnf:/etc/mysql/conf.d/zz-client-charset.cnf:ro
+      - smartledge-mysql-data:/var/lib/mysql
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${SMARTLEDGE_MYSQL_PASSWORD:-smartledge}"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: smartledge-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${SMARTLEDGE_PG_PASSWORD:-smartledge}
+      # 让 initdb 默认库就是目标库，从而 create_table_postgres_sql.sql 可直接执行。
+      POSTGRES_DB: smartledge_pgvector
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      # 01 建库脚本里是 CREATE DATABASE smartledge_pgvector，与 POSTGRES_DB 同名；
+      # CREATE DATABASE 在目标库已存在时会报错终止，因此这里只挂建表与后续迁移。
+      - ../sql/表结构/PostgresSql/create_table_postgres_sql.sql:/docker-entrypoint-initdb.d/01-create-table.sql:ro
+      - ../sql/表结构/迁移/S19-附加索引与向量维度-PostgresSql.sql:/docker-entrypoint-initdb.d/02-s19-indexes.sql:ro
+      - ../sql/表结构/迁移/S21-向量表租户化-PostgresSql.sql:/docker-entrypoint-initdb.d/03-s21-tenant-rls.sql:ro
+      - smartledge-postgres-data:/var/lib/postgresql/data
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d smartledge_pgvector"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: smartledge-redis
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --requirepass
+      - ${SMARTLEDGE_REDIS_PASSWORD:-smartledge}
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+    ports:
+      - "127.0.0.1:6381:6379"
+    volumes:
+      - smartledge-redis-data:/data
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${SMARTLEDGE_REDIS_PASSWORD:-smartledge}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:4.3.4-management
+    container_name: smartledge-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${SMARTLEDGE_RABBITMQ_USER:-smartledge}
+      RABBITMQ_DEFAULT_PASS: ${SMARTLEDGE_RABBITMQ_PASSWORD:-smartledge}
+      RABBITMQ_DEFAULT_VHOST: /
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    volumes:
+      - smartledge-rabbitmq-data:/var/lib/rabbitmq
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 40s
+
+  neo4j:
+    image: neo4j:5.26-community
+    container_name: smartledge-neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/${SMARTLEDGE_NEO4J_PASSWORD:-smartledge2026}
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 768m
+      NEO4J_server_memory_pagecache_size: 512m
+    ports:
+      - "127.0.0.1:7687:7687"
+      - "127.0.0.1:7474:7474"
+    volumes:
+      - smartledge-neo4j-data:/data
+    mem_limit: 2g
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  minio:
+    # MinIO 已不再发布到 Docker Hub，官方镜像在 quay.io。
+    image: quay.io/minio/minio:RELEASE.2024-12-13T22-19-12Z
+    container_name: smartledge-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${SMARTLEDGE_MINIO_USER:-smartledge}
+      MINIO_ROOT_PASSWORD: ${SMARTLEDGE_MINIO_PASSWORD:-smartledge123}
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - smartledge-minio-data:/data
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  elasticsearch:
+    # 由 deploy/elasticsearch/Dockerfile 构建：官方 ES + IK 中文分词插件。
+    #   构建：docker build -t smartledge-elasticsearch:8.18.6-ik deploy/elasticsearch
+    image: smartledge-elasticsearch:8.18.6-ik
+    container_name: smartledge-elasticsearch
+    restart: unless-stopped
+    environment:
+      # 仅监听回环并由 nginx 统一入口，因此关闭安全模块；
+      # application.yaml 里的用户名/密码在 security 关闭时不会被校验。
+      xpack.security.enabled: "false"
+      xpack.security.enrollment.enabled: "false"
+      discovery.type: single-node
+      ES_JAVA_OPTS: -Xms1536m -Xmx1536m
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:9201:9200"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - smartledge-es-data:/usr/share/elasticsearch/data
+    mem_limit: 2560m
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9200/_cluster/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 30
+      start_period: 90s
+
+volumes:
+  smartledge-mysql-data:
+  smartledge-postgres-data:
+  smartledge-redis-data:
+  smartledge-rabbitmq-data:
+  smartledge-neo4j-data:
+  smartledge-minio-data:
+  smartledge-es-data:
