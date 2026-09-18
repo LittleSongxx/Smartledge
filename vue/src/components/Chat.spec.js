@@ -45,6 +45,29 @@ describe('Chat answer rendering', () => {
     expect(document.body.textContent).toContain('来源 [1] · 培训手册')
   })
 
+  it('makes [4] clickable when backend referenceId is 4, not array position 3', async () => {
+    const wrapper = mountChat({
+      id: 'assistant-gap',
+      role: 'assistant',
+      content: '协议要点见 [2][4]。',
+      references: [
+        { referenceId: '1', citationIdentity: 'KG_QUOTE:1', citationEvidenceType: 'CHUNK', documentName: '原文', quoteText: 'MIT License' },
+        { referenceId: '2', citationIdentity: 'CHUNK:2', citationEvidenceType: 'CHUNK', documentName: '摘要甲', quoteText: '授权范围' },
+        { referenceId: '4', citationIdentity: 'CHUNK:4', citationEvidenceType: 'CHUNK', documentName: '摘要乙', quoteText: '免责声明' }
+      ],
+      recommendations: []
+    })
+
+    const tokens = wrapper.findAll('.citation-token')
+    expect(tokens.map((token) => token.text())).toEqual(['[2]', '[4]'])
+    expect(wrapper.text()).not.toMatch(/\[3\]/)
+
+    await tokens[1].trigger('click')
+    await nextTick()
+    expect(document.body.textContent).toContain('来源 [4] · 摘要乙')
+    expect(document.body.textContent).toContain('免责声明')
+  })
+
   it('keeps failure recovery in the answer context', async () => {
     const wrapper = mountChat({
       id: 'assistant-2',

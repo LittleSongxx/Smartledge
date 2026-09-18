@@ -152,7 +152,7 @@ onMounted(() => { if (!isUser.value) highlightCodeBlocks() })
     :class="isUser ? 'flex justify-end' : ''"
     :data-message-role="message.role"
   >
-    <div v-if="isUser" class="max-w-[min(42rem,88%)] rounded-lg border border-border bg-secondary px-4 py-3 text-foreground">
+    <div v-if="isUser" class="max-w-[min(42rem,88%)] rounded-lg border border-transparent bg-accent px-4 py-3 text-accent-foreground">
       <div class="mb-1 flex items-center justify-between gap-3">
         <span class="text-xs font-medium">你 · {{ formatTime(message.updatedAt || message.createdAt) }}</span>
         <Button variant="ghost" size="icon-sm" class="size-11 sm:size-8" type="button" :title="copyButtonTitle" :aria-label="copyButtonTitle" @click="copyContent">

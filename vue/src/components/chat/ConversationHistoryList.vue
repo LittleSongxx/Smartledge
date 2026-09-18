@@ -92,8 +92,8 @@ function formatTime(value) {
       <li
         v-for="session in sortedSessions"
         :key="session.conversationId"
-        class="group flex min-w-0 items-start border-b border-l-2 border-b-border border-l-transparent px-2 py-2"
-        :class="session.conversationId === currentConversationId ? 'border-l-primary bg-secondary' : 'hover:bg-muted/70'"
+        class="nav-session group mb-1 flex min-w-0 items-start px-1 py-1"
+        :class="session.conversationId === currentConversationId ? 'nav-session--current' : ''"
       >
         <Button
           variant="ghost"

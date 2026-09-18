@@ -699,7 +699,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="flex h-dvh overflow-hidden bg-background text-foreground">
+  <section class="relative isolate flex h-dvh overflow-hidden bg-admin-bg text-foreground">
+    <div class="ambient-field -z-10" aria-hidden="true"></div>
     <a
       href="#chat-main-content"
       class="fixed left-4 top-3 z-[var(--z-tooltip)] -translate-y-16 rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground opacity-0 transition focus:translate-y-0 focus:opacity-100 motion-reduce:transition-none"
@@ -719,7 +720,7 @@ onBeforeUnmount(() => {
       @retry="refreshSessions"
     />
 
-    <main id="chat-main-content" tabindex="-1" class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card outline-none">
+    <main id="chat-main-content" tabindex="-1" class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background outline-none">
       <header class="flex h-16 flex-none items-center justify-between gap-3 border-b border-border px-3 sm:px-5">
         <div class="flex min-w-0 items-center gap-2">
           <Button
@@ -796,7 +797,7 @@ onBeforeUnmount(() => {
 
           <div v-else-if="!displayMessages.length" class="mx-auto grid min-h-full max-w-[920px] place-items-center px-5 py-8 text-center">
             <div class="max-w-2xl">
-              <span class="mx-auto grid size-11 place-items-center rounded-md border border-border bg-card text-primary" aria-hidden="true">
+              <span class="mx-auto grid size-11 place-items-center rounded-lg border border-border bg-card text-primary shadow-[var(--shadow-control)]" aria-hidden="true">
                 <SparklesIcon class="size-5" />
               </span>
               <h2 class="mt-4 text-xl font-semibold leading-snug text-foreground">从一个具体问题开始</h2>
@@ -807,7 +808,7 @@ onBeforeUnmount(() => {
                   :key="prompt.text"
                   variant="outline"
                   size="lg"
-                  class="h-auto min-h-11 whitespace-normal rounded-md px-3 py-2 text-left leading-5"
+                  class="h-auto min-h-11 whitespace-normal px-3 py-2 text-left leading-5"
                   type="button"
                   :disabled="!canUsePromptChip"
                   @click="sendMessage(prompt.text)"
@@ -846,7 +847,7 @@ onBeforeUnmount(() => {
       <footer class="flex-none border-t border-border bg-card px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-5">
         <div class="mx-auto max-w-[920px]">
           <details class="group mb-2 border-b border-border pb-2" @toggle="onSettingsToggle">
-            <summary class="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-md px-2 text-sm text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40 sm:min-h-9">
+            <summary class="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-md px-2 text-sm text-muted-foreground transition-colors duration-150 hover:bg-nav-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40 sm:min-h-9">
               <span class="truncate">回答范围：{{ answerScopeSummary }}</span>
               <span class="shrink-0 text-xs text-primary group-open:hidden">展开设置</span>
               <span class="hidden shrink-0 text-xs text-primary group-open:inline">收起设置</span>
@@ -867,7 +868,7 @@ onBeforeUnmount(() => {
                   <label
                     v-for="item in knowledgeBaseOptions"
                     :key="item.id"
-                    class="flex min-h-11 cursor-pointer items-center gap-2 rounded-md px-2 hover:bg-card"
+                    class="flex min-h-11 cursor-pointer items-center gap-2 rounded-md px-2 transition-colors duration-150 hover:bg-nav-hover"
                   >
                     <Checkbox
                       :model-value="Boolean(isKnowledgeBaseSelected(item.id))"

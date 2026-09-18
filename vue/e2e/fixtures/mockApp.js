@@ -736,7 +736,19 @@ export function setMockApiEnvelope(path, envelope) {
 
 function validToken() {
   const header = btoa(JSON.stringify({ alg: 'none', typ: 'JWT' }))
-  const payload = btoa(JSON.stringify({ exp: 4102444800 }))
+  const payload = btoa(JSON.stringify({
+    exp: 4102444800,
+    uid: 1,
+    perms: [
+      'document:read',
+      'observe:read',
+      'kb:read',
+      'document:acl:manage',
+      'user:manage',
+      'config:read',
+      'console:access'
+    ]
+  }))
   return `${header}.${payload}.fixture`
 }
 

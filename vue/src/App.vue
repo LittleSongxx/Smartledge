@@ -3,6 +3,7 @@
   <router-view v-if="isFullscreenLayout" />
 
   <div v-else class="app-shell">
+    <div class="ambient-field" aria-hidden="true"></div>
     <header class="app-header">
       <div class="brand-lockup">
         <div class="brand-mark" aria-hidden="true">S</div>
@@ -37,8 +38,21 @@ const isFullscreenLayout = computed(() => {
 
 <style scoped>
 .app-shell {
+  position: relative;
+  isolation: isolate;
   min-height: 100vh;
   padding: 16px 24px 24px;
+  background: var(--admin-bg);
+}
+
+.app-shell > .ambient-field {
+  z-index: -1;
+}
+
+.app-header,
+.app-main,
+.app-footer {
+  position: relative;
 }
 
 .app-header {
@@ -64,8 +78,8 @@ const isFullscreenLayout = computed(() => {
   display: grid;
   place-items: center;
   border-radius: var(--radius-sm);
-  background: var(--primary);
-  color: var(--primary-foreground);
+  background-image: linear-gradient(145deg, var(--logo-from), var(--logo-to));
+  color: var(--logo-fg);
   font-size: var(--text-compact);
   font-weight: 800;
 }

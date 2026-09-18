@@ -1,15 +1,16 @@
 <template>
-  <div class="relative grid min-h-dvh place-items-center bg-admin-bg px-4 py-16 sm:px-6">
-    <main class="w-full max-w-[440px]">
+  <div class="relative isolate grid min-h-dvh place-items-center bg-admin-bg px-4 py-16 sm:px-6">
+    <div class="ambient-field -z-10" aria-hidden="true"></div>
+    <main class="relative w-full max-w-[440px]">
       <div class="mb-5 flex items-center gap-3 px-1">
-        <div class="grid size-9 place-items-center rounded-md bg-primary text-caption font-bold text-primary-foreground">SL</div>
+        <div class="brand-mark grid size-11 place-items-center rounded-lg text-body-sm font-bold">SL</div>
         <div>
           <p class="m-0 text-caption text-muted-foreground">Smartledge</p>
           <h1 class="m-0 text-title-sm font-semibold text-foreground">知识问答</h1>
         </div>
       </div>
 
-      <form class="rounded-lg border border-border bg-card p-5 shadow-control sm:p-6" novalidate @submit.prevent="submitLogin">
+      <form class="glass-card glass-edge rounded-xl border p-6 shadow-[var(--shadow-popover)] sm:p-8" novalidate @submit.prevent="submitLogin">
         <div class="border-b border-border pb-4">
           <h2 class="m-0 text-title font-semibold text-foreground">用户登录</h2>
           <p class="mt-2 text-body-sm leading-relaxed text-muted-foreground">
@@ -68,7 +69,7 @@
         <PortfolioTrialHint audience="chat" />
 
         <div class="mt-6">
-          <Button class="w-full rounded-md" size="lg" type="submit" :loading="submitting" loading-text="登录中">登录并开始问答</Button>
+          <Button class="w-full" size="lg" type="submit" :loading="submitting" loading-text="登录中">登录并开始问答</Button>
         </div>
       </form>
     </main>

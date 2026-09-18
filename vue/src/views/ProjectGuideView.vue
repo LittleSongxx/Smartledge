@@ -1,6 +1,7 @@
 <template>
-  <div class="min-h-dvh bg-background px-4 py-10 text-foreground sm:px-6">
-    <article class="mx-auto w-full max-w-3xl">
+  <div class="relative isolate min-h-dvh bg-admin-bg px-4 py-10 text-foreground sm:px-6">
+    <div class="ambient-field -z-10" aria-hidden="true"></div>
+    <article class="relative mx-auto w-full max-w-3xl">
       <p class="m-0 text-caption text-muted-foreground">Smartledge</p>
       <h1 class="mt-2 text-title font-semibold">如何学习本项目</h1>
       <p class="mt-3 leading-7 text-muted-foreground">

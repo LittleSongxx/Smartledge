@@ -17,10 +17,10 @@ test('design lab exposes the balanced classification and workflow roles', async 
 
   const autoMode = page.locator('[data-route-mode="auto"]')
   const shadowMode = page.locator('[data-route-mode="shadow"]')
-  await expectColor(autoMode, 'color', 'rgb(43, 95, 160)')
-  await expectColor(autoMode, 'background-color', 'rgb(234, 242, 251)')
-  await expectColor(shadowMode, 'color', 'rgb(106, 84, 168)')
-  await expectColor(shadowMode, 'background-color', 'rgb(242, 239, 250)')
+  await expectColor(autoMode, 'color', 'rgb(42, 87, 140)')
+  await expectColor(autoMode, 'background-color', 'rgb(232, 241, 250)')
+  await expectColor(shadowMode, 'color', 'rgb(106, 79, 150)')
+  await expectColor(shadowMode, 'background-color', 'rgb(243, 238, 248)')
   await expect(page.locator('[data-tone="success"]').filter({ hasText: '策略方案已确认' })).toHaveCount(1)
   await expect(page.locator('[data-tone="running"]').filter({ hasText: '构建索引可执行' })).toHaveCount(1)
 
@@ -60,8 +60,8 @@ test('route trace keeps auto and shadow distinct without losing text labels', as
   const shadowMode = page.locator('[data-route-mode="shadow"]').first()
   await expect(autoMode).toContainText('自动知识路由')
   await expect(shadowMode).toContainText('影子路由对比')
-  await expectColor(autoMode, 'background-color', 'rgb(234, 242, 251)')
-  await expectColor(shadowMode, 'background-color', 'rgb(242, 239, 250)')
+  await expectColor(autoMode, 'background-color', 'rgb(232, 241, 250)')
+  await expectColor(shadowMode, 'background-color', 'rgb(243, 238, 248)')
   await page.screenshot({ path: testInfo.outputPath('route-trace-balanced.png'), fullPage: true, animations: 'disabled' })
 })
 
@@ -123,6 +123,6 @@ test('document execution distinguishes confirmed success from build running', as
   await expect(confirmed).toBeVisible()
   await expect(build).toBeVisible()
   await expectColor(confirmed, 'color', 'rgb(18, 125, 74)')
-  await expectColor(build, 'color', 'rgb(10, 109, 122)')
+  await expectColor(build, 'color', 'rgb(17, 85, 120)')
   await page.screenshot({ path: testInfo.outputPath('document-execution-balanced.png'), fullPage: true, animations: 'disabled' })
 })

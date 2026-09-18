@@ -46,6 +46,12 @@ export function sourceReferenceIdentity(reference) {
   return asText(reference?.citationIdentity) || asText(reference?.referenceId)
 }
 
+export function sourceCitationIndex(reference, arrayIndex) {
+  const raw = asText(reference?.referenceId)
+  if (/^[1-9]\d*$/.test(raw)) return Number(raw)
+  return arrayIndex + 1
+}
+
 export function projectSourceReferences(references) {
   if (!Array.isArray(references)) return []
 
@@ -55,7 +61,7 @@ export function projectSourceReferences(references) {
     if (!identity || reference?.contextOnly || evidenceType === 'CONTEXT_ONLY') return []
 
     return [{
-      index: index + 1,
+      index: sourceCitationIndex(reference, index),
       identity,
       evidenceType,
       title: asText(reference?.documentName) || asText(reference?.title) || `来源 ${index + 1}`,

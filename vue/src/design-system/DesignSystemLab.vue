@@ -88,8 +88,9 @@ const graphSwatches = Array.from({ length: 8 }, (_, index) => [
 </script>
 
 <template>
-  <main class="min-h-screen bg-background text-foreground">
-    <div class="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8">
+  <main class="relative isolate min-h-screen bg-admin-bg text-foreground">
+    <div class="ambient-field -z-10" aria-hidden="true"></div>
+    <div class="relative mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8">
       <PageHeader
         title="Smartledge 设计系统实验台"
         description="当前生产 Token、基础组件和居中子页面弹窗合同。"
@@ -153,7 +154,7 @@ const graphSwatches = Array.from({ length: 8 }, (_, index) => [
       <section class="lab-section" aria-labelledby="lab-controls-title">
         <div class="lab-section__heading">
           <h2 id="lab-controls-title">控件与组合</h2>
-          <p>后台操作使用 36px 主按钮；紧凑操作保持 32px 和 rounded-md。</p>
+          <p>后台操作使用 36px 主按钮；紧凑操作保持 32px。主按钮带按压缩放，输入框聚焦时描边切到品牌色。</p>
         </div>
 
         <FilterToolbar>

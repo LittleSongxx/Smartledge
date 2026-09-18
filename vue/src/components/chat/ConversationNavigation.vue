@@ -43,7 +43,7 @@ const emit = defineEmits([
     aria-label="会话历史"
   >
     <header class="flex h-16 flex-none items-center gap-2 border-b border-border px-3">
-      <div v-if="!collapsed" class="grid size-8 flex-none place-items-center rounded-md bg-primary text-xs font-bold text-primary-foreground" aria-hidden="true">SL</div>
+      <div v-if="!collapsed" class="brand-mark grid size-8 flex-none place-items-center rounded-lg text-xs font-bold" aria-hidden="true">SL</div>
       <div v-if="!collapsed" class="min-w-0 flex-1">
         <strong class="block truncate text-sm font-semibold text-foreground">Smartledge</strong>
       </div>

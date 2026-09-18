@@ -56,4 +56,15 @@ describe('chat behavior contracts', () => {
     expect(projected.map((item) => item.identity)).toEqual(['CHUNK:8:12', 'web-2'])
     expect(projected[0]).toMatchObject({ title: '员工手册', pageNo: '3', snippet: '试用期为三个月。' })
   })
+
+  it('uses backend referenceId so budget-omitted holes stay clickable', () => {
+    const projected = projectSourceReferences([
+      { referenceId: '1', citationIdentity: 'KG_QUOTE:1', documentName: '原文' },
+      { referenceId: '2', citationIdentity: 'CHUNK:2', documentName: '摘要甲' },
+      { referenceId: '4', citationIdentity: 'CHUNK:4', documentName: '摘要乙' }
+    ])
+
+    expect(projected.map((item) => item.index)).toEqual([1, 2, 4])
+    expect(projected.map((item) => item.identity)).toEqual(['KG_QUOTE:1', 'CHUNK:2', 'CHUNK:4'])
+  })
 })

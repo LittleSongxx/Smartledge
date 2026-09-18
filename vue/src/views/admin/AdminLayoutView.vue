@@ -12,9 +12,9 @@
       the page behind it; it reads as a column because of the hairline on its right edge,
       not because it is a lighter panel.
     -->
-    <aside class="admin-sidebar hidden min-h-dvh border-r border-admin-border lg:flex">
+    <aside class="admin-sidebar hidden min-h-dvh border-r border-admin-border bg-card lg:flex">
       <div class="flex h-14 flex-none items-center gap-2 border-b border-border px-3">
-        <div class="grid size-8 flex-none place-items-center rounded-md bg-primary text-caption font-bold text-primary-foreground">SL</div>
+        <div class="brand-mark grid size-8 flex-none place-items-center rounded-lg text-caption font-bold">SL</div>
         <strong v-if="!desktopCollapsed" class="min-w-0 flex-1 truncate text-body-sm font-semibold text-foreground">Smartledge</strong>
         <Button
           variant="ghost"
@@ -40,9 +40,8 @@
               :title="desktopCollapsed ? item.label : undefined"
               :aria-current="isNavItemActive(item) ? 'page' : undefined"
               :class="cn(
-                'flex min-h-9 items-center gap-2 rounded-md px-2.5 text-body-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40',
-                desktopCollapsed && 'justify-center px-0',
-                isNavItemActive(item) && 'bg-selection text-foreground'
+                'nav-item flex min-h-9 items-center gap-2 px-2.5 text-body-sm focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40',
+                desktopCollapsed && 'justify-center px-0'
               )"
             >
               <component :is="item.icon" class="size-[18px] flex-none" aria-hidden="true" />
@@ -115,7 +114,7 @@
         </DrawerHeader>
         <aside class="flex min-h-0 flex-1 flex-col">
           <div class="flex h-14 flex-none items-center gap-2 border-b border-border px-4">
-            <div class="grid size-8 place-items-center rounded-md bg-primary text-caption font-bold text-primary-foreground">SL</div>
+            <div class="brand-mark grid size-8 place-items-center rounded-lg text-caption font-bold">SL</div>
             <strong class="text-body-sm font-semibold text-foreground">Smartledge</strong>
           </div>
           <nav class="min-h-0 flex-1 overflow-y-auto px-3 py-4" aria-label="移动端后台导航">
@@ -128,8 +127,7 @@
                   :to="item.to"
                   :aria-current="isNavItemActive(item) ? 'page' : undefined"
                   :class="cn(
-                    'flex min-h-11 items-center gap-3 rounded-md px-3 text-body-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40',
-                    isNavItemActive(item) && 'bg-selection text-foreground'
+                    'nav-item flex min-h-11 items-center gap-3 px-3 text-body-sm focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40'
                   )"
                   @click="mobileNavOpen = false"
                 >
@@ -159,7 +157,7 @@
         continuous surface the way the reference does. At the shell's lower alpha there was
         a visible step between this bar and the content below it.
       -->
-      <header class="glass-panel sticky top-0 z-[var(--z-sticky)] flex h-14 items-center gap-3 border-b border-admin-border px-4 sm:px-5 lg:px-6">
+      <header class="glass-card sticky top-0 z-[var(--z-sticky)] flex h-14 items-center gap-3 border-b border-admin-border px-4 sm:px-5 lg:px-6">
         <Button
           variant="ghost"
           size="icon-lg"
@@ -323,12 +321,12 @@ function isNavItemActive(item) {
 }
 
 /*
- * The header uses the panel tier for colour continuity with the content below it, but it
- * is also the only sticky glass surface, so it needs the blur that .glass-panel omits —
- * without it, content scrolling underneath reads straight through the translucent bar.
+ * The header is the only sticky glass surface, so it needs the blur that the
+ * glass card utility omits — without it, content scrolling underneath reads
+ * straight through the translucent bar.
  */
 @supports (backdrop-filter: blur(1px)) {
-  header.glass-panel {
+  header.glass-card {
     backdrop-filter: blur(var(--glass-blur)) saturate(150%);
   }
 }
