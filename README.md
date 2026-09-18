@@ -19,8 +19,9 @@
 </p>
 
 <p align="center">
-  <a href="https://smartledge.cn">在线演示</a>
-  · 登录页自带作品集试用账号（只读）
+  <a href="https://smartledge.cn/login">用户端</a>
+  ·
+  <a href="https://smartledge.cn/admin/login">管理端</a>
 </p>
 
 <p align="center">
@@ -168,7 +169,7 @@ java -jar smartledge-business/smartledge-business-chat/target/smartledge-busines
 cd vue && npm install && npm run dev    # http://127.0.0.1:5174
 ```
 
-本地种子账号：`admin` / `admin123456`（管理）、`alice` / `user123456`（对话）。线上试用走 https://smartledge.cn 登录页上的 guest / reviewer。
+本地种子账号：`admin` / `admin123456`（管理）、`alice` / `user123456`（对话）。线上试用走 [用户端](https://smartledge.cn/login) 的 guest、[管理端](https://smartledge.cn/admin/login) 的 reviewer。
 
 更完整的单机部署步骤见 [deploy/server/README.md](deploy/server/README.md)。
 
