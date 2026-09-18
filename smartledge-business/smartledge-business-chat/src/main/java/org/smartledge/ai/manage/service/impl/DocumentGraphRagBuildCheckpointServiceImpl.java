@@ -77,7 +77,6 @@ public class DocumentGraphRagBuildCheckpointServiceImpl implements GraphRagBuild
                 putIfNotNull(state, "entityCount", result.getEntityCount());
                 putIfNotNull(state, "relationCount", result.getRelationCount());
                 putIfNotNull(state, "evidenceCount", result.getEvidenceCount());
-                putIfNotNull(state, "communityCount", result.getCommunityCount());
                 putIfNotNull(state, "graphPersistenceOutcome", result.getGraphPersistenceOutcome());
                 putIfNotNull(state, "graphPersistenceReason", result.getGraphPersistenceReason());
                 putIfNotNull(state, "kgCommitted", result.getKgCommitted());

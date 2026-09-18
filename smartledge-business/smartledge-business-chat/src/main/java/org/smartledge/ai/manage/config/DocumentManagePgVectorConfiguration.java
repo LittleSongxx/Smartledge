@@ -9,6 +9,7 @@ import org.springframework.beans.factory.DisposableBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.smartledge.ai.manage.support.PgVectorTenantOperations;
+import org.smartledge.ai.model.config.AiModelProperties;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
@@ -51,6 +52,16 @@ public class DocumentManagePgVectorConfiguration {
     public PgVectorTenantOperations pgVectorTenantOperations(
         @Qualifier("documentManagePgVectorJdbcTemplate") JdbcTemplate jdbcTemplate) {
         return new PgVectorTenantOperations(jdbcTemplate);
+    }
+
+    /**
+     * 启动期维度/HNSW 对账：列类型、ANN 索引与 {@code app.ai.embedding.dimensions} 任一漂移即拒绝启动。
+     */
+    @Bean
+    public PgVectorSchemaConsistencyChecker pgVectorSchemaConsistencyChecker(
+        @Qualifier("documentManagePgVectorJdbcTemplate") JdbcTemplate jdbcTemplate,
+        AiModelProperties aiModelProperties) {
+        return new PgVectorSchemaConsistencyChecker(jdbcTemplate, aiModelProperties);
     }
 
     private String buildJdbcUrl(DocumentManageProperties.PgVector pg) {

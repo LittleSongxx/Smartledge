@@ -97,8 +97,7 @@ public class LlmGraphRagQueryPlanAdvisor implements GraphRagQueryPlanAdvisor {
 
     private boolean catalogEmpty(GraphRagQueryCatalog catalog) {
         return CollUtil.isEmpty(catalog.getEntities())
-            && CollUtil.isEmpty(catalog.getRelations())
-            && CollUtil.isEmpty(catalog.getCommunities());
+            && CollUtil.isEmpty(catalog.getRelations());
     }
 
     private ChatCallOptions buildCallOptions() {
@@ -113,7 +112,6 @@ public class LlmGraphRagQueryPlanAdvisor implements GraphRagQueryPlanAdvisor {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("entities", renderEntities(catalog));
         payload.put("relations", renderRelations(catalog));
-        payload.put("communities", renderCommunities(catalog));
         return objectMapper.writeValueAsString(payload);
     }
 
@@ -145,19 +143,6 @@ public class LlmGraphRagQueryPlanAdvisor implements GraphRagQueryPlanAdvisor {
                 item.put("targetEntityId", relation.getTargetEntityId());
                 item.put("targetEntityName", StrUtil.blankToDefault(relation.getTargetEntityName(), ""));
                 item.put("description", StrUtil.maxLength(StrUtil.blankToDefault(relation.getDescription(), ""), 180));
-                return item;
-            })
-            .toList();
-    }
-
-    private List<Map<String, Object>> renderCommunities(GraphRagQueryCatalog catalog) {
-        return (catalog.getCommunities() == null ? List.<GraphRagQueryCatalog.CommunityItem>of() : catalog.getCommunities()).stream()
-            .filter(community -> community != null && community.getCommunityId() != null)
-            .map(community -> {
-                Map<String, Object> item = new LinkedHashMap<>();
-                item.put("communityId", community.getCommunityId());
-                item.put("title", StrUtil.blankToDefault(community.getTitle(), ""));
-                item.put("summary", StrUtil.maxLength(StrUtil.blankToDefault(community.getSummary(), ""), 220));
                 return item;
             })
             .toList();

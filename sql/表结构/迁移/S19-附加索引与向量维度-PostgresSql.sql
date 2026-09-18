@@ -8,8 +8,8 @@
 --
 -- 前置条件：两张向量表中已有的向量维度必须一致，且与应用配置 app.ai.embedding.dimensions 相同。
 -- 本脚本在维度不一致时会主动报错并中止，不会静默改写数据。
--- 全新部署的执行顺序：create_database_postgres_sql.sql -> create_table_postgres_sql.sql -> 本文件。
--- 可重复执行。
+-- 全新部署：基线 create_table_postgres_sql.sql 已直接建 vector(1024) + HNSW，无需再执行本文件；
+-- 本文件只服务按旧基线建库的存量环境。列类型已是 vector(1024) 时跳过 ALTER，可重复执行。
 
 -- 期望维度：必须与 application.yaml 的 app.ai.embedding.dimensions 保持一致。
 -- 如需调整，请同时修改这里和配置，并重新执行本脚本。
@@ -18,30 +18,47 @@ DO $$
 DECLARE
     expected_dim integer := 1024;
     observed_dims text;
+    column_type text;
 BEGIN
-    SELECT string_agg(DISTINCT vector_dims(embedding)::text, ',' ORDER BY vector_dims(embedding)::text)
-      INTO observed_dims
-      FROM public.smartledge_document_embedding;
+    SELECT format_type(a.atttypid, a.atttypmod) INTO column_type
+      FROM pg_attribute a
+      JOIN pg_class c ON a.attrelid = c.oid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = 'public' AND c.relname = 'smartledge_document_embedding' AND a.attname = 'embedding';
 
-    IF observed_dims IS NOT NULL AND observed_dims <> expected_dim::text THEN
-        RAISE EXCEPTION 'smartledge_document_embedding 存在非 % 维向量（实际维度: %），已中止；请先清理或重建向量数据',
-            expected_dim, observed_dims;
+    IF column_type IS DISTINCT FROM 'vector(' || expected_dim || ')' THEN
+      SELECT string_agg(DISTINCT vector_dims(embedding)::text, ',' ORDER BY vector_dims(embedding)::text)
+        INTO observed_dims
+        FROM public.smartledge_document_embedding;
+
+      IF observed_dims IS NOT NULL AND observed_dims <> expected_dim::text THEN
+          RAISE EXCEPTION 'smartledge_document_embedding 存在非 % 维向量（实际维度: %），已中止；请先清理或重建向量数据',
+              expected_dim, observed_dims;
+      END IF;
+
+      ALTER TABLE public.smartledge_document_embedding
+          ALTER COLUMN embedding TYPE vector(1024);
     END IF;
 
-    ALTER TABLE public.smartledge_document_embedding
-        ALTER COLUMN embedding TYPE vector(1024);
+    SELECT format_type(a.atttypid, a.atttypmod) INTO column_type
+      FROM pg_attribute a
+      JOIN pg_class c ON a.attrelid = c.oid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = 'public' AND c.relname = 'smartledge_raptor_embedding' AND a.attname = 'embedding';
 
-    SELECT string_agg(DISTINCT vector_dims(embedding)::text, ',' ORDER BY vector_dims(embedding)::text)
-      INTO observed_dims
-      FROM public.smartledge_raptor_embedding;
+    IF column_type IS DISTINCT FROM 'vector(' || expected_dim || ')' THEN
+      SELECT string_agg(DISTINCT vector_dims(embedding)::text, ',' ORDER BY vector_dims(embedding)::text)
+        INTO observed_dims
+        FROM public.smartledge_raptor_embedding;
 
-    IF observed_dims IS NOT NULL AND observed_dims <> expected_dim::text THEN
-        RAISE EXCEPTION 'smartledge_raptor_embedding 存在非 % 维向量（实际维度: %），已中止；请先清理或重建向量数据',
-            expected_dim, observed_dims;
+      IF observed_dims IS NOT NULL AND observed_dims <> expected_dim::text THEN
+          RAISE EXCEPTION 'smartledge_raptor_embedding 存在非 % 维向量（实际维度: %），已中止；请先清理或重建向量数据',
+              expected_dim, observed_dims;
+      END IF;
+
+      ALTER TABLE public.smartledge_raptor_embedding
+          ALTER COLUMN embedding TYPE vector(1024);
     END IF;
-
-    ALTER TABLE public.smartledge_raptor_embedding
-        ALTER COLUMN embedding TYPE vector(1024);
 END $$;
 
 -- HNSW + 余弦距离。检索语句使用 `embedding <=> CAST(? AS vector)`，因此必须用 vector_cosine_ops。

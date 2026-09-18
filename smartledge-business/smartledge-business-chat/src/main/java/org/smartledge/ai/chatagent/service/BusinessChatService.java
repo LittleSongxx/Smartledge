@@ -92,6 +92,8 @@ public class BusinessChatService {
     private static final String SOURCE_SNAPSHOT_VISIBILITY = "GENERATION_VISIBLE";
     private static final Duration CHAT_RUNNING_LEASE_TTL = Duration.ofSeconds(30);
     private static final Duration CHAT_RUNNING_LEASE_RENEW_INTERVAL = Duration.ofSeconds(10);
+    /** 部分答案落库节流间隔：崩溃最多丢这段窗口内的增量，终态不受影响。 */
+    private static final long PARTIAL_ANSWER_FLUSH_INTERVAL_MILLIS = 2_000L;
 
     private final ChatCheckpointManager checkpointManager;
     private final ChatAgentProperties chatAgentProperties;
@@ -117,6 +119,8 @@ public class BusinessChatService {
     private final org.smartledge.ai.manage.service.KnowledgeManageService knowledgeManageService;
     private final CodeProvenanceResolver codeProvenanceResolver;
     private final DemoChatQuota demoChatQuota;
+    private final org.smartledge.ai.chatagent.support.ChatRateLimiter chatRateLimiter;
+    private final ChatExchangeFeedbackService chatExchangeFeedbackService;
 
     public Flux<String> openConversationStream(ChatRequestDto request) {
 
@@ -127,10 +131,22 @@ public class BusinessChatService {
 
         log.info("======request内容：{}", JSON.toJSONString(request));
         StreamLaunchPlan launchPlan = null;
+        RequestIdentity rateIdentity = null;
         boolean leaseClaimed = false;
+        boolean concurrencyAcquired = false;
         try {
 
             launchPlan = buildLaunchPlan(request);
+
+            rateIdentity = conversationAccessGuard.requireIdentity();
+            if (!chatRateLimiter.tryAcquireUserWindow(rateIdentity.tenantId(), rateIdentity.userId())) {
+                return rejectionFlux("提问过于频繁，请稍后再试", launchPlan.getConversationId(), null);
+            }
+            concurrencyAcquired = chatRateLimiter.tryAcquireTenantConversation(
+                rateIdentity.tenantId(), launchPlan.getConversationId());
+            if (!concurrencyAcquired) {
+                return rejectionFlux("当前组织的并发问答已达上限，请稍后再试", launchPlan.getConversationId(), null);
+            }
 
             leaseClaimed = claimConversationLease(launchPlan);
             if (!leaseClaimed) {
@@ -139,6 +155,7 @@ public class BusinessChatService {
 
             BootstrapResult bootstrapResult = bootstrapConversation(launchPlan);
             if (StrUtil.isNotBlank(bootstrapResult.getRejectionMessage())) {
+                releaseTenantConcurrencyQuietly(rateIdentity.tenantId(), launchPlan.getConversationId());
                 return rejectionFlux(bootstrapResult.getRejectionMessage(), launchPlan.getConversationId(), null);
             }
             return bootstrapResult.getOutbound();
@@ -148,6 +165,9 @@ public class BusinessChatService {
                 launchPlan == null ? "" : launchPlan.getConversationId(),
                 request.getQuestion(),
                 exception);
+            if (concurrencyAcquired && rateIdentity != null && launchPlan != null) {
+                releaseTenantConcurrencyQuietly(rateIdentity.tenantId(), launchPlan.getConversationId());
+            }
             if (leaseClaimed && launchPlan != null) {
                 releaseLeaseQuietly(launchPlan.getLeaseKey(), launchPlan.getLeaseOwnerToken());
             }
@@ -370,6 +390,15 @@ public class BusinessChatService {
             launchPlan.getLeaseOwnerToken(),
             CHAT_RUNNING_LEASE_TTL
         );
+    }
+
+    private void releaseTenantConcurrencyQuietly(Long tenantId, String conversationId) {
+        try {
+            chatRateLimiter.releaseTenantConversation(tenantId, conversationId);
+        }
+        catch (RuntimeException exception) {
+            log.warn("释放租户并发额度失败, conversationId={}", conversationId, exception);
+        }
     }
 
     private void failBootstrappedExchange(String conversationId, long exchangeId, String errorMessage) {
@@ -696,6 +725,7 @@ public class BusinessChatService {
     }
 
     private void emitModelChunk(TaskInfo taskInfo, String chunk) {
+        String flushCandidate = null;
         // Share the answer buffer lock with terminal snapshots. A late callback cannot change a finalized result.
         synchronized (taskInfo.answerBuffer()) {
             if (taskInfo.finalized().get()) { return; }
@@ -704,6 +734,40 @@ public class BusinessChatService {
                 taskInfo.firstResponseTimeMs().compareAndSet(0L, System.currentTimeMillis() - taskInfo.startTime());
             }
             safeEmit(taskInfo.sink(), streamEventWriter.text(chunk, taskInfo.eventMetadata()));
+            flushCandidate = partialFlushSnapshot(taskInfo);
+        }
+        if (flushCandidate != null) {
+            flushPartialAnswerQuietly(taskInfo, flushCandidate);
+        }
+    }
+
+    /**
+     * 崩溃安全兜底：流式生成中把已生成答案周期性落库（只覆盖 RUNNING 轮次），
+     * 进程崩溃或断线后已生成部分不再只存在于内存。终态写入永远覆盖这些中间快照。
+     */
+    private String partialFlushSnapshot(TaskInfo taskInfo) {
+        long now = System.currentTimeMillis();
+        int length = taskInfo.answerBuffer().length();
+        if (length <= taskInfo.getLastPartialFlushLength()) {
+            return null;
+        }
+        if (now - taskInfo.getLastPartialFlushAtMillis() < PARTIAL_ANSWER_FLUSH_INTERVAL_MILLIS) {
+            return null;
+        }
+        taskInfo.setLastPartialFlushAtMillis(now);
+        taskInfo.setLastPartialFlushLength(length);
+        return taskInfo.answerBuffer().toString();
+    }
+
+    private void flushPartialAnswerQuietly(TaskInfo taskInfo, String answer) {
+        try {
+            TenantContext.callWith(taskInfo.tenantId(),
+                () -> conversationArchiveStore.flushPartialAnswer(taskInfo.conversationId(), taskInfo.exchangeId(), answer));
+        }
+        catch (RuntimeException exception) {
+            // 兜底落库失败不影响流式回答；终态写入仍然完整收口。
+            log.debug("部分答案落库失败, conversationId={}, exchangeId={}",
+                taskInfo.conversationId(), taskInfo.exchangeId(), exception);
         }
     }
 
@@ -1013,6 +1077,13 @@ public class BusinessChatService {
 
         releaseLeaseQuietly(taskInfo.leaseKey(), taskInfo.leaseOwnerToken());
 
+        try {
+            chatRateLimiter.releaseTenantConversation(taskInfo.tenantId(), taskInfo.conversationId());
+        }
+        catch (RuntimeException exception) {
+            log.warn("清理租户并发额度失败, conversationId={}", taskInfo.conversationId(), exception);
+        }
+
         chatRuntimeRegistry.remove(taskInfo.tenantId(), taskInfo.conversationId(), taskInfo);
     }
 
@@ -1222,6 +1293,7 @@ public class BusinessChatService {
         List<ChatMessage> messageList = state.map(AgentState::messages).orElseGet(List::of);
         List<ConversationExchangeView> archiveExchanges = archiveRecord.exchanges() == null ? List.of() : archiveRecord.exchanges();
         List<ConversationExchangeView> exchanges = includeExchanges ? archiveExchanges : List.of();
+        enrichFeedback(exchanges);
         int businessMessageCount = businessMessageCount(archiveExchanges);
         String businessLatestUserMessage = latestExchangeQuestion(archiveExchanges);
         String businessLatestAssistantMessage = latestExchangeAnswer(archiveExchanges);
@@ -1250,6 +1322,37 @@ public class BusinessChatService {
             exchanges,
             includeMemorySummary ? conversationMemoryService.getConversationSummary(archiveRecord.conversationId()) : null
         );
+    }
+
+    /** 会话视图补充用户反馈：观测与本人会话都取该轮最新一条反馈（只有归属用户能提交）。 */
+    private void enrichFeedback(List<ConversationExchangeView> exchanges) {
+        if (exchanges == null || exchanges.isEmpty()) {
+            return;
+        }
+        try {
+            List<Long> exchangeIds = exchanges.stream()
+                .filter(java.util.Objects::nonNull)
+                .map(ConversationExchangeView::getExchangeId)
+                .toList();
+            Map<Long, ChatExchangeFeedbackService.FeedbackSummary> feedbacks =
+                chatExchangeFeedbackService.latestByExchange(exchangeIds);
+            if (feedbacks.isEmpty()) {
+                return;
+            }
+            for (ConversationExchangeView exchange : exchanges) {
+                ChatExchangeFeedbackService.FeedbackSummary summary = exchange == null
+                    ? null
+                    : feedbacks.get(exchange.getExchangeId());
+                if (summary != null) {
+                    exchange.setFeedbackRating(summary.rating());
+                    exchange.setFeedbackComment(summary.comment());
+                }
+            }
+        }
+        catch (RuntimeException exception) {
+            // 反馈是附加信号，读取失败不阻断会话视图。
+            log.debug("补充轮次用户反馈失败, conversationId 未知", exception);
+        }
     }
 
     private ConversationSessionView overlayRuntimeSnapshot(ConversationSessionView sessionView) {
@@ -1314,7 +1417,9 @@ public class BusinessChatService {
             exchange.getSelectedKnowledgeBaseNames(),
             exchange.getRetrievalConfigSnapshotJson(),
             exchange.getCreateTime(),
-            exchange.getEditTime()
+            exchange.getEditTime(),
+            exchange.getFeedbackRating(),
+            exchange.getFeedbackComment()
         );
     }
 
@@ -1567,6 +1672,12 @@ public class BusinessChatService {
             CHAT_RUNNING_LEASE_TTL
         );
         if (renewed) {
+            try {
+                chatRateLimiter.refreshTenantConversationTtl(taskInfo.tenantId(), taskInfo.conversationId());
+            }
+            catch (RuntimeException exception) {
+                log.warn("刷新租户并发额度 TTL 失败, conversationId={}", taskInfo.conversationId(), exception);
+            }
 
             return;
         }

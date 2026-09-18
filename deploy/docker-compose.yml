@@ -9,7 +9,7 @@
 #
 # 端口分配（与 application.yaml 一致，仅监听本机回环）：
 #   MySQL 3307 / PostgreSQL 5432 / Redis 6381 / RabbitMQ 5672+15672
-#   Neo4j 7687+7474 / MinIO 9000+9001 / Elasticsearch 9201
+#   MinIO 9000+9001 / Elasticsearch 9201
 #
 # MySQL 初始化脚本按挂载文件名排序执行，下面的 01-08 就是全新部署的完整顺序：
 #   01 建库 -> 02 建表 -> 03 系统配置快照 -> 04 S19 索引
@@ -128,28 +128,6 @@ services:
       retries: 20
       start_period: 40s
 
-  neo4j:
-    image: neo4j:5.26-community
-    container_name: smartledge-neo4j
-    restart: unless-stopped
-    environment:
-      NEO4J_AUTH: neo4j/${SMARTLEDGE_NEO4J_PASSWORD:-smartledge2026}
-      NEO4J_server_memory_heap_initial__size: 512m
-      NEO4J_server_memory_heap_max__size: 768m
-      NEO4J_server_memory_pagecache_size: 512m
-    ports:
-      - "127.0.0.1:7687:7687"
-      - "127.0.0.1:7474:7474"
-    volumes:
-      - smartledge-neo4j-data:/data
-    mem_limit: 2g
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:7474 || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-      start_period: 60s
-
   minio:
     # MinIO 已不再发布到 Docker Hub，官方镜像在 quay.io。
     image: quay.io/minio/minio:RELEASE.2024-12-13T22-19-12Z
@@ -207,6 +185,5 @@ volumes:
   smartledge-postgres-data:
   smartledge-redis-data:
   smartledge-rabbitmq-data:
-  smartledge-neo4j-data:
   smartledge-minio-data:
   smartledge-es-data:

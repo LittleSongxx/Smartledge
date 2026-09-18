@@ -11,19 +11,15 @@ import lombok.extern.slf4j.Slf4j;
 import org.smartledge.ai.knowledge.augmentation.config.GraphRagBuildProperties;
 import org.smartledge.ai.knowledge.augmentation.config.GraphRagExecutionProperties;
 import org.smartledge.ai.knowledge.augmentation.config.GraphRagExtractionOptions;
-import org.smartledge.ai.knowledge.augmentation.data.SuperAgentKgCommunity;
 import org.smartledge.ai.knowledge.augmentation.data.SuperAgentKgEntity;
 import org.smartledge.ai.knowledge.augmentation.data.SuperAgentKgEvidence;
 import org.smartledge.ai.knowledge.augmentation.data.SuperAgentKgRelation;
-import org.smartledge.ai.knowledge.augmentation.mapper.SuperAgentKgCommunityMapper;
 import org.smartledge.ai.knowledge.augmentation.mapper.SuperAgentKgEntityMapper;
 import org.smartledge.ai.knowledge.augmentation.mapper.SuperAgentKgEvidenceMapper;
 import org.smartledge.ai.knowledge.augmentation.mapper.SuperAgentKgRelationMapper;
 import org.smartledge.ai.knowledge.augmentation.model.GraphRagExtractionRequest;
 import org.smartledge.ai.knowledge.augmentation.model.GraphRagExtractionResponse;
 import org.smartledge.ai.knowledge.augmentation.model.graph.GraphRagBuildResult;
-import org.smartledge.ai.knowledge.augmentation.model.graph.GraphRagCommunityReportAdvice;
-import org.smartledge.ai.knowledge.augmentation.model.graph.GraphRagCommunityReportContext;
 import org.smartledge.ai.knowledge.augmentation.model.graph.GraphRagEntityResolutionAdvice;
 import org.smartledge.ai.knowledge.augmentation.model.graph.GraphRagEntityResolutionContext;
 import org.smartledge.ai.knowledge.augmentation.model.graph.GraphRagExtractionAdvice;
@@ -34,7 +30,6 @@ import org.smartledge.ai.knowledge.augmentation.port.GraphRagTableProjectionPort
 import org.smartledge.ai.knowledge.augmentation.port.KnowledgeBaseAugmentationConfigurationPort;
 import org.smartledge.ai.knowledge.augmentation.service.GraphRagBuildCheckpointService;
 import org.smartledge.ai.knowledge.augmentation.service.GraphRagBuildService;
-import org.smartledge.ai.knowledge.augmentation.service.GraphRagCommunityReportAdvisor;
 import org.smartledge.ai.knowledge.augmentation.service.GraphRagCrossDocumentIndexService;
 import org.smartledge.ai.knowledge.augmentation.service.GraphRagEntityResolutionAdvisor;
 import org.smartledge.ai.knowledge.augmentation.support.GraphRagBatchExecutor;
@@ -92,26 +87,17 @@ public class GraphRagBuildServiceImpl implements GraphRagBuildService {
     private static final String GRAPH_EXTRACTION_ADVISOR_METADATA_KEY = "candidateValidation";
     private static final Pattern DIRECT_ACTION_SEGMENT_BOUNDARY = Pattern
             .compile("[。！？.!?；;]+|\\R+(?![\\t ]*(?:[-*+]|\\d+[.)、]))");
-    private static final String COMMUNITY_REPORT_STRATEGY_EXTRACTIVE = "extractive.template.v1";
-    private static final String COMMUNITY_REPORT_STRATEGY_LLM = "llm.controlled.v1";
     private static final int RANK_ITERATIONS = 30;
     private static final double RANK_DAMPING = 0.85D;
     private static final double GRAPH_EXTRACTION_CONFIDENCE_THRESHOLD = GraphRagExtractionAdvice.MIN_ACCEPTED_CONFIDENCE;
-    private static final double COMMUNITY_REPORT_CONFIDENCE_THRESHOLD = 0.60D;
     private static final double ENTITY_RESOLUTION_CONFIDENCE_THRESHOLD = 0.78D;
     private static final int ENTITY_RESOLUTION_CONTEXT_LIMIT = 80;
-    private static final int COMMUNITY_CONTEXT_ENTITY_LIMIT = 30;
-    private static final int COMMUNITY_CONTEXT_RELATION_LIMIT = 60;
-    private static final int COMMUNITY_CONTEXT_EVIDENCE_LIMIT = 30;
-    private static final int COMMUNITY_REPORT_FINDING_LIMIT = 5;
 
     private final SuperAgentKgEntityMapper entityMapper;
 
     private final SuperAgentKgRelationMapper relationMapper;
 
     private final SuperAgentKgEvidenceMapper evidenceMapper;
-
-    private final SuperAgentKgCommunityMapper communityMapper;
 
     private final SuperAgentDocumentTaskMapper taskMapper;
 
@@ -132,8 +118,6 @@ public class GraphRagBuildServiceImpl implements GraphRagBuildService {
     private final TransactionTemplate transactionTemplate;
 
     private final GraphRagLlmConfigurationPort extractionConfiguration;
-
-    private final GraphRagCommunityReportAdvisor communityReportAdvisor;
 
     private final GraphRagEntityResolutionAdvisor entityResolutionAdvisor;
 
@@ -164,23 +148,20 @@ public class GraphRagBuildServiceImpl implements GraphRagBuildService {
 
     @Autowired
     public GraphRagBuildServiceImpl(SuperAgentKgEntityMapper entityMapper, SuperAgentKgRelationMapper relationMapper,
-            SuperAgentKgEvidenceMapper evidenceMapper, SuperAgentKgCommunityMapper communityMapper,
+            SuperAgentKgEvidenceMapper evidenceMapper,
             SuperAgentDocumentTaskMapper taskMapper, SuperAgentDocumentChunkMapper chunkMapper,
             GraphRagExtractionPort graphRagExtractionPort, ObjectMapper objectMapper, UidGenerator uidGenerator,
             GraphRagBuildProperties buildProperties, RedisLeaseManager redisLeaseManager,
             GraphRagBuildCheckpointService checkpointService, TransactionTemplate transactionTemplate,
             ObjectProvider<GraphRagLlmConfigurationPort> extractionConfigurationProvider,
-            ObjectProvider<GraphRagCommunityReportAdvisor> communityReportAdvisorProvider,
             ObjectProvider<GraphRagEntityResolutionAdvisor> entityResolutionAdvisorProvider,
             ObjectProvider<GraphRagCrossDocumentIndexService> crossDocumentIndexServiceProvider,
             ObjectProvider<KnowledgeBaseAugmentationConfigurationPort> indexingConfigResolverProvider) {
-        this(entityMapper, relationMapper, evidenceMapper, communityMapper, taskMapper, chunkMapper,
+        this(entityMapper, relationMapper, evidenceMapper, taskMapper, chunkMapper,
                 graphRagExtractionPort, objectMapper, uidGenerator, buildProperties, redisLeaseManager,
                 checkpointService, transactionTemplate,
                 extractionConfigurationProvider == null ? null
                         : (GraphRagLlmConfigurationPort) extractionConfigurationProvider.getIfAvailable(),
-                communityReportAdvisorProvider == null ? null
-                        : (GraphRagCommunityReportAdvisor) communityReportAdvisorProvider.getIfAvailable(),
                 entityResolutionAdvisorProvider == null ? null
                         : (GraphRagEntityResolutionAdvisor) entityResolutionAdvisorProvider.getIfAvailable(),
                 crossDocumentIndexServiceProvider == null ? null : crossDocumentIndexServiceProvider.getIfAvailable(),
@@ -188,46 +169,45 @@ public class GraphRagBuildServiceImpl implements GraphRagBuildService {
     }
 
     public GraphRagBuildServiceImpl(SuperAgentKgEntityMapper entityMapper, SuperAgentKgRelationMapper relationMapper,
-            SuperAgentKgEvidenceMapper evidenceMapper, SuperAgentKgCommunityMapper communityMapper,
+            SuperAgentKgEvidenceMapper evidenceMapper,
             SuperAgentDocumentTaskMapper taskMapper, SuperAgentDocumentChunkMapper chunkMapper,
             GraphRagExtractionPort graphRagExtractionPort, ObjectMapper objectMapper, UidGenerator uidGenerator,
             GraphRagBuildProperties buildProperties, RedisLeaseManager redisLeaseManager,
             GraphRagBuildCheckpointService checkpointService, TransactionTemplate transactionTemplate) {
-        this(entityMapper, relationMapper, evidenceMapper, communityMapper, taskMapper, chunkMapper,
+        this(entityMapper, relationMapper, evidenceMapper, taskMapper, chunkMapper,
                 graphRagExtractionPort, objectMapper, uidGenerator, buildProperties, redisLeaseManager,
                 checkpointService, transactionTemplate, (GraphRagLlmConfigurationPort) null,
-                (GraphRagCommunityReportAdvisor) null, (GraphRagEntityResolutionAdvisor) null, null, null);
+                (GraphRagEntityResolutionAdvisor) null, null, null);
     }
 
     GraphRagBuildServiceImpl(SuperAgentKgEntityMapper entityMapper, SuperAgentKgRelationMapper relationMapper,
-            SuperAgentKgEvidenceMapper evidenceMapper, SuperAgentKgCommunityMapper communityMapper,
+            SuperAgentKgEvidenceMapper evidenceMapper,
             SuperAgentDocumentTaskMapper taskMapper, SuperAgentDocumentChunkMapper chunkMapper,
             GraphRagExtractionPort graphRagExtractionPort, ObjectMapper objectMapper, UidGenerator uidGenerator,
             GraphRagBuildProperties buildProperties, RedisLeaseManager redisLeaseManager,
             GraphRagBuildCheckpointService checkpointService, TransactionTemplate transactionTemplate,
-            GraphRagLlmConfigurationPort extractionConfiguration, GraphRagCommunityReportAdvisor communityReportAdvisor,
+            GraphRagLlmConfigurationPort extractionConfiguration,
             GraphRagEntityResolutionAdvisor entityResolutionAdvisor,
             GraphRagCrossDocumentIndexService crossDocumentIndexService) {
-        this(entityMapper, relationMapper, evidenceMapper, communityMapper, taskMapper, chunkMapper,
+        this(entityMapper, relationMapper, evidenceMapper, taskMapper, chunkMapper,
                 graphRagExtractionPort, objectMapper, uidGenerator, buildProperties, redisLeaseManager,
-                checkpointService, transactionTemplate, extractionConfiguration, communityReportAdvisor,
+                checkpointService, transactionTemplate, extractionConfiguration,
                 entityResolutionAdvisor, crossDocumentIndexService, null);
     }
 
     GraphRagBuildServiceImpl(SuperAgentKgEntityMapper entityMapper, SuperAgentKgRelationMapper relationMapper,
-            SuperAgentKgEvidenceMapper evidenceMapper, SuperAgentKgCommunityMapper communityMapper,
+            SuperAgentKgEvidenceMapper evidenceMapper,
             SuperAgentDocumentTaskMapper taskMapper, SuperAgentDocumentChunkMapper chunkMapper,
             GraphRagExtractionPort graphRagExtractionPort, ObjectMapper objectMapper, UidGenerator uidGenerator,
             GraphRagBuildProperties buildProperties, RedisLeaseManager redisLeaseManager,
             GraphRagBuildCheckpointService checkpointService, TransactionTemplate transactionTemplate,
-            GraphRagLlmConfigurationPort extractionConfiguration, GraphRagCommunityReportAdvisor communityReportAdvisor,
+            GraphRagLlmConfigurationPort extractionConfiguration,
             GraphRagEntityResolutionAdvisor entityResolutionAdvisor,
             GraphRagCrossDocumentIndexService crossDocumentIndexService,
             KnowledgeBaseAugmentationConfigurationPort indexingConfigResolver) {
         this.entityMapper = entityMapper;
         this.relationMapper = relationMapper;
         this.evidenceMapper = evidenceMapper;
-        this.communityMapper = communityMapper;
         this.taskMapper = taskMapper;
         this.chunkMapper = chunkMapper;
         this.graphRagExtractionPort = graphRagExtractionPort;
@@ -238,7 +218,6 @@ public class GraphRagBuildServiceImpl implements GraphRagBuildService {
         this.checkpointService = checkpointService;
         this.transactionTemplate = transactionTemplate;
         this.extractionConfiguration = extractionConfiguration;
-        this.communityReportAdvisor = communityReportAdvisor;
         this.entityResolutionAdvisor = entityResolutionAdvisor;
         this.crossDocumentIndexService = crossDocumentIndexService;
         this.indexingConfigResolver = indexingConfigResolver;
@@ -403,7 +382,6 @@ public class GraphRagBuildServiceImpl implements GraphRagBuildService {
                 insertEntities(preparedGraph.entities().entitiesById().values());
                 insertRelations(preparedGraph.relations().relationsById().values());
                 insertEvidences(preparedGraph.evidences().evidencesById().values());
-                insertCommunities(preparedGraph.communities());
                 return result;
             });
         }
@@ -425,7 +403,7 @@ public class GraphRagBuildServiceImpl implements GraphRagBuildService {
         GraphRagExtractionResponse response = new GraphRagExtractionResponse();
         PreparedGraph preparedGraph = prepareGraph(documentId, taskId, response);
         GraphRagBuildResult result = GraphRagBuildResult.builder().entityCount(0).relationCount(0).evidenceCount(0)
-                .communityCount(0).graphPersistenceOutcome(GraphRagBuildResult.GraphPersistenceOutcome.EMPTY)
+                .graphPersistenceOutcome(GraphRagBuildResult.GraphPersistenceOutcome.EMPTY)
                 .graphPersistenceReason(reason).kgCommitted(true)
                 .pythonInvocationOutcome(GraphRagBuildResult.InvocationOutcome.NOT_CALLED)
                 .advisorInvocationOutcome(GraphRagBuildResult.InvocationOutcome.NOT_CALLED)
@@ -456,7 +434,7 @@ public class GraphRagBuildServiceImpl implements GraphRagBuildService {
                 relationCount);
         return GraphRagBuildResult.builder().entityCount(entityCount).relationCount(relationCount)
                 .evidenceCount(preparedGraph.evidences().evidencesById().size())
-                .communityCount(preparedGraph.communities().size()).graphPersistenceOutcome(persistenceOutcome)
+                .graphPersistenceOutcome(persistenceOutcome)
                 .graphPersistenceReason(persistenceReason(persistenceOutcome, contract, advisorOutcome))
                 .kgCommitted(true).pythonInvocationOutcome(GraphRagBuildResult.InvocationOutcome.SUCCESS)
                 .advisorInvocationOutcome(advisorOutcome).pythonExtractionStatus(contract.status())
@@ -637,8 +615,7 @@ public class GraphRagBuildServiceImpl implements GraphRagBuildService {
     private Map<String, Object> extractionCheckpointMetadata(GraphRagExtractionResponse response) {
         return metadata("entityCount", size(response == null ? null : response.getEntities()), "relationCount",
                 size(response == null ? null : response.getRelations()), "evidenceCount",
-                size(response == null ? null : response.getEvidences()), "communityCount",
-                size(response == null ? null : response.getCommunities()), "extractorMetadata",
+                size(response == null ? null : response.getEvidences()), "extractorMetadata",
                 response == null ? null : response.getMetadata());
     }
 
@@ -646,15 +623,10 @@ public class GraphRagBuildServiceImpl implements GraphRagBuildService {
         SavedEntities savedEntities = prepareEntities(documentId, taskId, response.getEntities());
         SavedRelations savedRelations = prepareRelations(documentId, taskId, response.getRelations(),
                 savedEntities.sourceIdToEntityId());
-        GraphRankSnapshot rankSnapshot = enrichGraphRankMetadata(savedEntities.entitiesById(),
-                savedRelations.relationsById());
+        enrichGraphRankMetadata(savedEntities.entitiesById(), savedRelations.relationsById());
         SavedEvidences savedEvidences = prepareEvidences(documentId, taskId, response.getEvidences(),
                 savedEntities.sourceIdToEntityId(), savedRelations.sourceIdToRelationId());
-        List<SuperAgentKgCommunity> communities = prepareCommunities(documentId, taskId, response.getCommunities(),
-                savedEntities.sourceIdToEntityId(), savedRelations.sourceIdToRelationId(),
-                savedEvidences.sourceIdToEvidenceId(), rankSnapshot, savedEntities.entitiesById(),
-                savedRelations.relationsById(), savedEvidences.evidencesById());
-        return new PreparedGraph(savedEntities, savedRelations, savedEvidences, communities);
+        return new PreparedGraph(savedEntities, savedRelations, savedEvidences);
     }
 
     private GraphRagExtractionResponse applyGraphExtractionAdvice(Long documentId, Long taskId, int attempt,
@@ -1531,8 +1503,6 @@ public class GraphRagBuildServiceImpl implements GraphRagBuildService {
         merged.setEntities(mergeList(baseResponse.getEntities(), validation.entities()));
         merged.setRelations(mergeList(baseResponse.getRelations(), validation.relations()));
         merged.setEvidences(mergeList(baseResponse.getEvidences(), validation.evidences()));
-        merged.setCommunities(baseResponse.getCommunities() == null ? new ArrayList<>()
-                : new ArrayList<>(baseResponse.getCommunities()));
         merged.setMetadata(baseResponse.getMetadata());
         return merged;
     }
@@ -1850,8 +1820,6 @@ public class GraphRagBuildServiceImpl implements GraphRagBuildService {
         if (documentId == null || taskId == null) {
             return;
         }
-        communityMapper.delete(new LambdaQueryWrapper<SuperAgentKgCommunity>()
-                .eq(SuperAgentKgCommunity::getDocumentId, documentId).eq(SuperAgentKgCommunity::getTaskId, taskId));
         evidenceMapper.delete(new LambdaQueryWrapper<SuperAgentKgEvidence>()
                 .eq(SuperAgentKgEvidence::getDocumentId, documentId).eq(SuperAgentKgEvidence::getTaskId, taskId));
         relationMapper.delete(new LambdaQueryWrapper<SuperAgentKgRelation>()
@@ -1866,8 +1834,6 @@ public class GraphRagBuildServiceImpl implements GraphRagBuildService {
         if (documentId == null) {
             return;
         }
-        communityMapper.delete(
-                new LambdaQueryWrapper<SuperAgentKgCommunity>().eq(SuperAgentKgCommunity::getDocumentId, documentId));
         evidenceMapper.delete(
                 new LambdaQueryWrapper<SuperAgentKgEvidence>().eq(SuperAgentKgEvidence::getDocumentId, documentId));
         relationMapper.delete(
@@ -2272,28 +2238,6 @@ public class GraphRagBuildServiceImpl implements GraphRagBuildService {
                 Math.max(0.05D, weight), Double::sum);
     }
 
-    private CommunityRank resolveCommunityRank(List<Long> entityIds, List<Long> relationIds,
-            GraphRankSnapshot rankSnapshot) {
-        if (rankSnapshot == null || CollUtil.isEmpty(entityIds)) {
-            return new CommunityRank(relationIds, 0D, 0D, 0D, List.of());
-        }
-        List<NodeRankWithId> entityRanks = entityIds.stream()
-                .map(entityId -> new NodeRankWithId(entityId,
-                        rankSnapshot.entityRanks().getOrDefault(entityId, NodeRank.empty())))
-                .sorted(Comparator.comparingDouble((NodeRankWithId item) -> item.rank().rankBoost()).reversed()
-                        .thenComparing(NodeRankWithId::entityId))
-                .toList();
-        double maxEntityRankBoost = entityRanks.stream().mapToDouble(item -> item.rank().rankBoost()).max().orElse(0D);
-        double avgEntityRankBoost = entityRanks.stream().mapToDouble(item -> item.rank().rankBoost()).average()
-                .orElse(0D);
-        double relationRankBoost = relationIds.stream().map(rankSnapshot.relationRanks()::get).filter(Objects::nonNull)
-                .mapToDouble(RelationRank::rankBoost).max().orElse(0D);
-        double rankBoost = bounded(maxEntityRankBoost * 0.50D + avgEntityRankBoost * 0.25D + relationRankBoost * 0.25D);
-        List<Long> topRankedEntityIds = entityRanks.stream().filter(item -> item.rank().rankBoost() > 0D)
-                .map(NodeRankWithId::entityId).limit(8).toList();
-        return new CommunityRank(relationIds, rankBoost, maxEntityRankBoost, avgEntityRankBoost, topRankedEntityIds);
-    }
-
     private SavedEvidences prepareEvidences(Long documentId, Long taskId,
             List<GraphRagExtractionResponse.Evidence> evidences, Map<String, Long> entityIdMap,
             Map<String, Long> relationIdMap) {
@@ -2412,253 +2356,6 @@ public class GraphRagBuildServiceImpl implements GraphRagBuildService {
         for (SuperAgentKgEvidence evidence : evidences) {
             evidenceMapper.insert(evidence);
         }
-    }
-
-    private List<SuperAgentKgCommunity> prepareCommunities(Long documentId, Long taskId,
-            List<GraphRagExtractionResponse.Community> communities, Map<String, Long> entityIdMap,
-            Map<String, Long> relationIdMap, Map<String, Long> evidenceIdMap, GraphRankSnapshot rankSnapshot,
-            Map<Long, SuperAgentKgEntity> entitiesById, Map<Long, SuperAgentKgRelation> relationsById,
-            Map<Long, SuperAgentKgEvidence> evidencesById) {
-        if (CollUtil.isEmpty(communities)) {
-            return List.of();
-        }
-        List<SuperAgentKgCommunity> result = new ArrayList<>();
-        int communityNo = 1;
-        for (GraphRagExtractionResponse.Community extracted : communities) {
-            if (extracted == null || StrUtil.isBlank(extracted.getId())) {
-                continue;
-            }
-            List<Long> entityIds = remapIds(extracted.getEntityIds(), entityIdMap);
-            if (entityIds.isEmpty()) {
-                continue;
-            }
-            CommunityRank communityRank = resolveCommunityRank(entityIds,
-                    remapIds(extracted.getRelationIds(), relationIdMap), rankSnapshot);
-            List<Long> evidenceIds = remapIds(extracted.getEvidenceIds(), evidenceIdMap);
-
-            SuperAgentKgCommunity community = new SuperAgentKgCommunity();
-            community.setId(uidGenerator.getUid());
-            community.setDocumentId(documentId);
-            community.setTaskId(taskId);
-            community.setCommunityNo(communityNo++);
-            community.setTitle(limit(StrUtil.blankToDefault(extracted.getTitle(), "未命名图谱社区"), 500));
-            community.setSummary(extracted.getSummary());
-            community.setEntityIdsJson(writeJson(entityIds));
-            community.setRelationIdsJson(writeJson(communityRank.relationIds()));
-            community.setEvidenceIdsJson(writeJson(evidenceIds));
-            Map<String, Object> metadata = metadata("sourceCommunityId", extracted.getId(), "sourceEntityIds",
-                    extracted.getEntityIds(), "sourceRelationIds", extracted.getRelationIds(), "sourceEvidenceIds",
-                    extracted.getEvidenceIds(), "sourceMetadata", extracted.getMetadata(), "communityReportStrategy",
-                    COMMUNITY_REPORT_STRATEGY_EXTRACTIVE, "communityReportEnhanced", false, "rankAlgorithm",
-                    RANK_ALGORITHM, "rankBoost", communityRank.rankBoost(), "maxEntityRankBoost",
-                    communityRank.maxEntityRankBoost(), "avgEntityRankBoost", communityRank.avgEntityRankBoost(),
-                    "topRankedEntityIds", communityRank.topRankedEntityIds());
-            applyCommunityReportAdvice(community, metadata, entityIds, communityRank.relationIds(), evidenceIds,
-                    entitiesById, relationsById, evidencesById);
-            community.setMetadataJson(writeJson(metadata));
-            community.setStatus(BusinessStatus.YES.getCode());
-            result.add(community);
-        }
-        return result;
-    }
-
-    private void insertCommunities(Collection<SuperAgentKgCommunity> communities) {
-        if (CollUtil.isEmpty(communities)) {
-            return;
-        }
-        for (SuperAgentKgCommunity community : communities) {
-            communityMapper.insert(community);
-        }
-    }
-
-    private void applyCommunityReportAdvice(SuperAgentKgCommunity community, Map<String, Object> metadata,
-            List<Long> entityIds, List<Long> relationIds, List<Long> evidenceIds,
-            Map<Long, SuperAgentKgEntity> entitiesById, Map<Long, SuperAgentKgRelation> relationsById,
-            Map<Long, SuperAgentKgEvidence> evidencesById) {
-        if (communityReportAdvisor == null || community == null || CollUtil.isEmpty(entityIds)
-                || CollUtil.isEmpty(evidenceIds)) {
-            return;
-        }
-        GraphRagCommunityReportContext context = buildCommunityReportContext(community, entityIds, relationIds,
-                evidenceIds, metadata, entitiesById, relationsById, evidencesById);
-        if (CollUtil.isEmpty(context.getEvidences())) {
-            metadata.put("communityReportRejectedReason", "NO_EVIDENCE_CONTEXT");
-            return;
-        }
-
-        Optional<GraphRagCommunityReportAdvice> advice;
-        try {
-            advice = communityReportAdvisor.generateReport(context);
-        }
-        catch (RuntimeException exception) {
-            metadata.put("communityReportRejectedReason", "ADVISOR_FAILED");
-            metadata.put("communityReportRejectedMessage", limit(exception.getMessage(), 300));
-            log.warn("GraphRAG 社区报告 advisor 失败，保留抽取式 community report: communityId={}, message={}", community.getId(),
-                    exception.getMessage());
-            return;
-        }
-        if (advice.isEmpty()) {
-            metadata.put("communityReportRejectedReason", "EMPTY_ADVICE");
-            return;
-        }
-
-        CommunityReportValidation validation = validateCommunityReportAdvice(advice.get(), evidenceIds);
-        if (validation.report() == null) {
-            metadata.put("communityReportRejectedReason", validation.rejectedReason());
-            return;
-        }
-
-        ValidatedCommunityReport report = validation.report();
-        community.setTitle(limit(report.title(), 500));
-        community.setSummary(report.text());
-        metadata.put("communityReportStrategy", COMMUNITY_REPORT_STRATEGY_LLM);
-        metadata.put("communityReportEnhanced", true);
-        metadata.put("communityReportConfidence", report.confidence());
-        metadata.put("communityReportRating", report.rating());
-        metadata.put("communityReportRatingExplanation", report.ratingExplanation());
-        metadata.put("communityReportEvidenceIds", report.evidenceIds());
-        metadata.put("communityReportFindingCount", report.findings().size());
-        metadata.put("communityReportReason", report.reason());
-    }
-
-    private GraphRagCommunityReportContext buildCommunityReportContext(SuperAgentKgCommunity community,
-            List<Long> entityIds, List<Long> relationIds, List<Long> evidenceIds, Map<String, Object> metadata,
-            Map<Long, SuperAgentKgEntity> entitiesById, Map<Long, SuperAgentKgRelation> relationsById,
-            Map<Long, SuperAgentKgEvidence> evidencesById) {
-        return GraphRagCommunityReportContext.builder().communityId(community.getId())
-                .communityNo(community.getCommunityNo()).originalTitle(community.getTitle())
-                .originalSummary(community.getSummary()).rankBoost(
-                        toDouble(metadata.get("rankBoost"), 0D))
-                .entities(
-                        entityIds.stream().map(entitiesById::get).filter(Objects::nonNull)
-                                .sorted(Comparator
-                                        .comparingDouble((SuperAgentKgEntity entity) -> toDouble(
-                                                readMetadata(entity.getMetadataJson()).get("rankBoost"), 0D))
-                                        .reversed().thenComparing(SuperAgentKgEntity::getId))
-                                .limit(COMMUNITY_CONTEXT_ENTITY_LIMIT)
-                                .map(entity -> GraphRagCommunityReportContext.EntityItem.builder()
-                                        .entityId(entity.getId()).name(entity.getName())
-                                        .entityType(entity.getEntityType()).description(entity.getDescription())
-                                        .rankBoost(
-                                                toDouble(readMetadata(entity.getMetadataJson()).get("rankBoost"), 0D))
-                                        .build())
-                                .toList())
-                .relations(relationIds.stream().map(relationsById::get).filter(Objects::nonNull)
-                        .limit(COMMUNITY_CONTEXT_RELATION_LIMIT).map(relation -> {
-                            SuperAgentKgEntity source = entitiesById.get(relation.getSourceEntityId());
-                            SuperAgentKgEntity target = entitiesById.get(relation.getTargetEntityId());
-                            return GraphRagCommunityReportContext.RelationItem.builder().relationId(relation.getId())
-                                    .sourceEntityId(relation.getSourceEntityId())
-                                    .sourceEntityName(source == null ? "" : source.getName())
-                                    .targetEntityId(relation.getTargetEntityId())
-                                    .targetEntityName(target == null ? "" : target.getName())
-                                    .relationType(relation.getRelationType()).description(relation.getDescription())
-                                    .build();
-                        }).toList())
-                .evidences(evidenceIds.stream().map(evidencesById::get)
-                        .filter(evidence -> evidence != null && StrUtil.isNotBlank(evidence.getQuoteText()))
-                        .limit(COMMUNITY_CONTEXT_EVIDENCE_LIMIT)
-                        .map(evidence -> GraphRagCommunityReportContext.EvidenceItem.builder()
-                                .evidenceId(evidence.getId()).entityId(evidence.getEntityId())
-                                .relationId(evidence.getRelationId()).chunkId(evidence.getChunkId())
-                                .quoteText(evidence.getQuoteText()).sectionPath(evidence.getSectionPath()).build())
-                        .toList())
-                .build();
-    }
-
-    private CommunityReportValidation validateCommunityReportAdvice(GraphRagCommunityReportAdvice advice,
-            List<Long> allowedEvidenceIds) {
-        if (advice == null || !Boolean.TRUE.equals(advice.getReportable())) {
-            return CommunityReportValidation.rejected("NOT_REPORTABLE");
-        }
-        double confidence = bounded(toDouble(advice.getConfidence(), 0D));
-        if (confidence < COMMUNITY_REPORT_CONFIDENCE_THRESHOLD) {
-            return CommunityReportValidation.rejected("LOW_CONFIDENCE");
-        }
-        if (StrUtil.isBlank(advice.getTitle()) || StrUtil.isBlank(advice.getSummary())) {
-            return CommunityReportValidation.rejected("BLANK_TITLE_OR_SUMMARY");
-        }
-
-        Set<Long> allowed = new LinkedHashSet<>(allowedEvidenceIds);
-        EvidenceValidation topLevelEvidence = validateAdviceEvidenceIds(advice.getEvidenceIds(), allowed, false);
-        if (!topLevelEvidence.valid()) {
-            return CommunityReportValidation.rejected("UNKNOWN_EVIDENCE_ID");
-        }
-        LinkedHashSet<Long> reportEvidenceIds = new LinkedHashSet<>(topLevelEvidence.evidenceIds());
-        List<ValidatedFinding> findings = new ArrayList<>();
-        if (CollUtil.isNotEmpty(advice.getFindings())) {
-            for (GraphRagCommunityReportAdvice.Finding finding : advice.getFindings()) {
-                if (finding == null || StrUtil.isBlank(finding.getSummary())
-                        || StrUtil.isBlank(finding.getExplanation())) {
-                    continue;
-                }
-                EvidenceValidation findingEvidence = validateAdviceEvidenceIds(finding.getEvidenceIds(), allowed,
-                        false);
-                if (!findingEvidence.valid()) {
-                    return CommunityReportValidation.rejected("UNKNOWN_EVIDENCE_ID");
-                }
-                if (findingEvidence.evidenceIds().isEmpty()) {
-                    continue;
-                }
-                reportEvidenceIds.addAll(findingEvidence.evidenceIds());
-                findings.add(new ValidatedFinding(limit(finding.getSummary(), 220),
-                        limit(finding.getExplanation(), 1200), findingEvidence.evidenceIds()));
-                if (findings.size() >= COMMUNITY_REPORT_FINDING_LIMIT) {
-                    break;
-                }
-            }
-        }
-        if (reportEvidenceIds.isEmpty()) {
-            return CommunityReportValidation.rejected("NO_GROUNDED_EVIDENCE");
-        }
-
-        double rating = Math.max(0D, Math.min(10D, toDouble(advice.getRating(), 0D)));
-        String summary = limit(advice.getSummary(), 3000);
-        String text = buildCommunityReportText(summary, findings, rating, advice.getRatingExplanation());
-        return CommunityReportValidation.accepted(new ValidatedCommunityReport(limit(advice.getTitle(), 500), text,
-                new ArrayList<>(reportEvidenceIds), findings, rounded(rating),
-                limit(advice.getRatingExplanation(), 1000), rounded(confidence), limit(advice.getReason(), 500)));
-    }
-
-    private EvidenceValidation validateAdviceEvidenceIds(List<Long> candidateIds, Set<Long> allowedEvidenceIds,
-            boolean requireEvidence) {
-        if (CollUtil.isEmpty(candidateIds)) {
-            return requireEvidence ? EvidenceValidation.invalid() : EvidenceValidation.valid(List.of());
-        }
-        LinkedHashSet<Long> result = new LinkedHashSet<>();
-        for (Long candidateId : candidateIds) {
-            if (candidateId == null) {
-                continue;
-            }
-            if (!allowedEvidenceIds.contains(candidateId)) {
-                return EvidenceValidation.invalid();
-            }
-            result.add(candidateId);
-        }
-        if (requireEvidence && result.isEmpty()) {
-            return EvidenceValidation.invalid();
-        }
-        return EvidenceValidation.valid(new ArrayList<>(result));
-    }
-
-    private String buildCommunityReportText(String summary, List<ValidatedFinding> findings, double rating,
-            String ratingExplanation) {
-        StringBuilder builder = new StringBuilder(StrUtil.blankToDefault(summary, ""));
-        if (CollUtil.isNotEmpty(findings)) {
-            builder.append("\n\n关键发现：");
-            for (int index = 0; index < findings.size(); index++) {
-                ValidatedFinding finding = findings.get(index);
-                builder.append("\n").append(index + 1).append(". ").append(finding.summary()).append("：")
-                        .append(finding.explanation()).append(" [evidenceIds=").append(finding.evidenceIds())
-                        .append("]");
-            }
-        }
-        if (StrUtil.isNotBlank(ratingExplanation)) {
-            builder.append("\n\n重要性评分：").append(
-                    BigDecimal.valueOf(rating).setScale(2, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString())
-                    .append("/10。").append(ratingExplanation);
-        }
-        return builder.toString();
     }
 
     private Map<String, EntityResolutionDecision> resolveEntityCanonicalKeyAdvice(
@@ -3117,20 +2814,6 @@ public class GraphRagBuildServiceImpl implements GraphRagBuildService {
         return candidate.length() > current.length() ? candidate : current;
     }
 
-    private List<Long> remapIds(List<String> sourceIds, Map<String, Long> idMap) {
-        if (CollUtil.isEmpty(sourceIds)) {
-            return List.of();
-        }
-        LinkedHashSet<Long> result = new LinkedHashSet<>();
-        for (String sourceId : sourceIds) {
-            Long id = idMap.get(sourceId);
-            if (id != null) {
-                result.add(id);
-            }
-        }
-        return new ArrayList<>(result);
-    }
-
     private BigDecimal weight(Double value) {
         double weight = value == null ? 1.0D : value;
         return BigDecimal.valueOf(weight).setScale(4, RoundingMode.HALF_UP);
@@ -3360,8 +3043,7 @@ public class GraphRagBuildServiceImpl implements GraphRagBuildService {
     private record EvidenceIdentity(Long entityId, Long relationId, Long chunkId, String quoteText) {
     }
 
-    private record PreparedGraph(SavedEntities entities, SavedRelations relations, SavedEvidences evidences,
-            List<SuperAgentKgCommunity> communities) {
+    private record PreparedGraph(SavedEntities entities, SavedRelations relations, SavedEvidences evidences) {
     }
 
     private record GraphRankSnapshot(Map<Long, NodeRank> entityRanks, Map<Long, RelationRank> relationRanks) {
@@ -3377,13 +3059,6 @@ public class GraphRagBuildServiceImpl implements GraphRagBuildService {
 
     private record RelationRank(double rankBoost, double sourceEntityRankBoost, double targetEntityRankBoost,
             double relationWeightBoost) {
-    }
-
-    private record CommunityRank(List<Long> relationIds, double rankBoost, double maxEntityRankBoost,
-            double avgEntityRankBoost, List<Long> topRankedEntityIds) {
-    }
-
-    private record NodeRankWithId(Long entityId, NodeRank rank) {
     }
 
     private record EntityExtractionCandidate(String localEntityId, String name, String normalizedName,
@@ -3518,36 +3193,6 @@ public class GraphRagBuildServiceImpl implements GraphRagBuildService {
 
         private static EntityResolutionGroupValidation rejected() {
             return new EntityResolutionGroupValidation(false, Map.of());
-        }
-    }
-
-    private record ValidatedFinding(String summary, String explanation, List<Long> evidenceIds) {
-    }
-
-    private record ValidatedCommunityReport(String title, String text, List<Long> evidenceIds,
-            List<ValidatedFinding> findings, double rating, String ratingExplanation, double confidence,
-            String reason) {
-    }
-
-    private record CommunityReportValidation(ValidatedCommunityReport report, String rejectedReason) {
-
-        private static CommunityReportValidation accepted(ValidatedCommunityReport report) {
-            return new CommunityReportValidation(report, null);
-        }
-
-        private static CommunityReportValidation rejected(String reason) {
-            return new CommunityReportValidation(null, reason);
-        }
-    }
-
-    private record EvidenceValidation(boolean valid, List<Long> evidenceIds) {
-
-        private static EvidenceValidation valid(List<Long> evidenceIds) {
-            return new EvidenceValidation(true, evidenceIds);
-        }
-
-        private static EvidenceValidation invalid() {
-            return new EvidenceValidation(false, List.of());
         }
     }
 }

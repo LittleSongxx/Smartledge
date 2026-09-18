@@ -273,6 +273,7 @@ public class DefaultDocumentVectorGateway implements DocumentVectorGateway {
                 List<float[]> embeddings = embeddingModel.embed(batch.chunks().stream()
                     .map(this::embeddingInput)
                     .toList());
+                validateEmbeddingDimensions(embeddingModel, embeddings, batch.batchIndex());
                 if (attempt > 1) {
                     log.info("embedding 批次重试成功，batchIndex={}/{}, attempt={}/{}, costMillis={}",
                         batch.batchIndex(), totalBatchCount, attempt, maxAttempts, elapsedMillis(attemptStartedNanos));
@@ -298,6 +299,21 @@ public class DefaultDocumentVectorGateway implements DocumentVectorGateway {
             }
         }
         throw lastException == null ? new IllegalStateException("embedding 批次重试失败。") : lastException;
+    }
+
+    /** 写入前的最后一道维度闸门：适配器声明了维度时不允许维度漂移的向量进入 pgvector。 */
+    private static void validateEmbeddingDimensions(EmbeddingPort embeddingModel, List<float[]> embeddings, int batchIndex) {
+        int expected = embeddingModel.dimensions();
+        if (expected <= 0) {
+            return;
+        }
+        for (int index = 0; index < embeddings.size(); index++) {
+            float[] vector = embeddings.get(index);
+            if (vector == null || vector.length != expected) {
+                throw new IllegalStateException("embedding 批次 " + batchIndex + " 第 " + index
+                    + " 条维度与端口声明不一致：" + (vector == null ? "null" : vector.length) + "，期望 " + expected);
+            }
+        }
     }
 
     private List<VectorBatch> buildBatches(List<SuperAgentDocumentChunk> validChunkList, int batchSize) {

@@ -285,6 +285,14 @@ public class SystemConfigRegistry {
                 duration("chat.recommendationTimeoutMs", "chatAgent", "推荐问题超时", "推荐问题生成超过该时长后按无推荐结果收口。", 100, 120000,
                         NEW_CONVERSATION, o -> o.getChat().getRecommendationTimeoutMs(),
                         (o, v) -> o.getChat().setRecommendationTimeoutMs((Long) v)),
+                integer("chat.rateLimit.perMinutePerUser", "chatAgent", "单用户每分钟提问上限",
+                        "同一用户每分钟允许发起的新问答轮次；Redis 固定窗口计数，超限拒绝。", 1, 10000, "次/分钟",
+                        NEW_CONVERSATION, o -> o.getChatRateLimit().getPerMinutePerUser(),
+                        (o, v) -> o.getChatRateLimit().setPerMinutePerUser((Integer) v)),
+                integer("chat.rateLimit.concurrentPerTenant", "chatAgent", "租户并发会话上限",
+                        "同一租户允许同时执行的流式问答会话数；Redis 集合计数，超限拒绝。", 1, 1000, "个",
+                        NEW_CONVERSATION, o -> o.getChatRateLimit().getConcurrentPerTenant(),
+                        (o, v) -> o.getChatRateLimit().setConcurrentPerTenant((Integer) v)),
 
                 bool("rag.enabled", "ragOrchestration", "启用 RAG 前置编排", "进入最终执行器前执行历史加载、问题改写和文档检索规划。", NEW_CONVERSATION,
                         o -> o.getRag().isEnabled(), (o, v) -> o.getRag().setEnabled((Boolean) v)),
@@ -421,10 +429,6 @@ public class SystemConfigRegistry {
                         "统一候选分段的最大 Unicode 码点数；连续细分保留全部尾部。", 50, 8000, "字符", NEW_BUILD_TASK,
                         o -> o.getGraphRagExtraction().getMaxUnitTextChars(),
                         (o, v) -> o.getGraphRagExtraction().setMaxUnitTextChars((Integer) v)),
-                bool("graphRag.communityReport.enabled", "graphRagEnhancement", "启用社区报告增强",
-                        "允许 LLM 基于白名单实体、关系和证据生成社区报告建议。", NEW_BUILD_TASK,
-                        o -> o.getGraphRagCommunityReport().isEnabled(),
-                        (o, v) -> o.getGraphRagCommunityReport().setEnabled((Boolean) v)),
                 bool("graphRag.entityResolution.enabled", "graphRagEnhancement", "启用实体消歧增强", "允许 LLM 基于受控候选提供实体合并建议。",
                         NEW_BUILD_TASK, o -> o.getGraphRagEntityResolution().isEnabled(),
                         (o, v) -> o.getGraphRagEntityResolution().setEnabled((Boolean) v)),
@@ -600,6 +604,7 @@ public class SystemConfigRegistry {
         requireComponent(snapshot.getPreviewMode(), "previewMode");
         requireComponent(snapshot.getEvaluationSnapshot(), "evaluation.snapshot");
         requireComponent(snapshot.getRetrievalProbe(), "evaluation.retrievalProbe");
+        requireComponent(snapshot.getChatRateLimit(), "chat.rateLimit");
         requireComponent(snapshot.getRagTools(), "ragTools");
         requireComponent(snapshot.getGraphRagDiagnostics(), "graphRag.diagnostics");
         requireComponent(snapshot.getGraphRagExecution(), "graphRag.execution");

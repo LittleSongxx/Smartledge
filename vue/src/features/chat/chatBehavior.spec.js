@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  hasRunningExchange,
   isNearScrollBottom,
   mergeAssistantStreamEvent,
   projectSourceReferences,
@@ -8,6 +9,13 @@ import {
 } from './chatBehavior'
 
 describe('chat behavior contracts', () => {
+  it('detects RUNNING exchanges so the view can poll for live snapshots', () => {
+    expect(hasRunningExchange([{ status: 'RUNNING' }])).toBe(true)
+    expect(hasRunningExchange([{ status: 'COMPLETED' }, { status: 'RUNNING', answer: '部分答案' }])).toBe(true)
+    expect(hasRunningExchange([{ status: 'COMPLETED' }, { status: 'FAILED' }])).toBe(false)
+    expect(hasRunningExchange([])).toBe(false)
+    expect(hasRunningExchange(null)).toBe(false)
+  })
   it('submits Enter only after IME composition has ended', () => {
     expect(shouldSubmitComposerEvent({ key: 'Enter', shiftKey: false, isComposing: false, keyCode: 13 })).toBe(true)
     expect(shouldSubmitComposerEvent({ key: 'Enter', shiftKey: false, isComposing: true, keyCode: 13 })).toBe(false)

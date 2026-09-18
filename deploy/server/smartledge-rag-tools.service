@@ -10,6 +10,9 @@ WorkingDirectory=/srv/smartledge/app/smartledge-rag-tools
 # 凭据与模型配置统一来自仓库根 .env，与 Java 侧同一份来源。
 EnvironmentFile=-/srv/smartledge/app/.env
 Environment=PYTHONUNBUFFERED=1 TOKENIZERS_PARALLELISM=false
+# PDF 解析降级链：默认 PDF 只走阿里云 Document Mind；断云时若装了 docling
+# （pip install docling）并在 .env 增加 SMARTLEDGE_DOCLING_PDF_FALLBACK=true，
+# PDF 自动降级为本地 Docling 解析。TXT/MD/HTML 始终走本地确定性解析，不受影响。
 ExecStart=/srv/smartledge/app/smartledge-rag-tools/.venv/bin/python -m uvicorn rag_tools.main:app --host 127.0.0.1 --port 18089
 Restart=always
 RestartSec=10

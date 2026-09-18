@@ -19,7 +19,6 @@ public class SystemConfigSnapshot {
     private ChatRagProperties rag = new ChatRagProperties();
     private GraphRagBuildProperties graphRagBuild = new GraphRagBuildProperties();
     private GraphRagExtractionOptions graphRagExtraction = new GraphRagExtractionOptions();
-    private ToggleOptions graphRagCommunityReport = new ToggleOptions();
     private ToggleOptions graphRagEntityResolution = new ToggleOptions();
     private int raptorLlmConcurrency = 3;
     private ChunkEnrichmentOptions chunkEnrichment = new ChunkEnrichmentOptions();
@@ -33,6 +32,7 @@ public class SystemConfigSnapshot {
     private ChunkEnrichmentExecutionOptions chunkEnrichmentExecution = new ChunkEnrichmentExecutionOptions();
     private DocumentManageProperties.IndexBuild indexBuild = new DocumentManageProperties.IndexBuild();
     private DocumentManageProperties.Chunk chunk = new DocumentManageProperties.Chunk();
+    private ChatRateLimitOptions chatRateLimit = new ChatRateLimitOptions();
 
     public static SystemConfigSnapshot defaults() {
         SystemConfigSnapshot snapshot = new SystemConfigSnapshot();
@@ -54,6 +54,13 @@ public class SystemConfigSnapshot {
         private int queueCapacity = 64;
         private int keepAliveSeconds = 60;
         private int shutdownAwaitSeconds = 10;
+    }
+
+    /** 问答入口限流：入口闸门在会话租约之前执行，读的是请求时刻的快照。 */
+    @Data
+    public static class ChatRateLimitOptions {
+        private int perMinutePerUser = 10;
+        private int concurrentPerTenant = 5;
     }
 
     @Data

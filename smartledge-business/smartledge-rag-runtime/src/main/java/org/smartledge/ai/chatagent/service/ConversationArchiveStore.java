@@ -51,6 +51,14 @@ public interface ConversationArchiveStore {
                           Long firstResponseTimeMs,
                           Long totalResponseTimeMs);
 
+    /**
+     * 流式中途落一次已生成答案（崩溃安全兜底）：只更新仍处于 RUNNING 的轮次，
+     * 且只覆盖 answer 与 edit_time；终态写入（completeExchange）永远覆盖它。
+     *
+     * @return false 表示轮次已不存在或已进入终态，本次无需落库。
+     */
+    boolean flushPartialAnswer(String conversationId, long exchangeId, String answer);
+
     Optional<ConversationArchiveRecord> getSessionRecord(String conversationId);
 
     List<ConversationExchangeView> listExchanges(String conversationId);

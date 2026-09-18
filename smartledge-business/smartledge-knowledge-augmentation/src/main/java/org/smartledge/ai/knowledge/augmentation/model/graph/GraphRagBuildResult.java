@@ -22,8 +22,6 @@ public class GraphRagBuildResult {
 
     private Integer evidenceCount;
 
-    private Integer communityCount;
-
     private GraphPersistenceOutcome graphPersistenceOutcome;
 
     private String graphPersistenceReason;

@@ -1,0 +1,21 @@
+# 本机开发 profile：只放本地依赖栈（deploy/docker-compose.local.yml）的默认口令。
+# 激活方式：--spring.profiles.active=local 或环境变量 SPRING_PROFILES_ACTIVE=local。
+# 生产部署禁止激活 local：主 application.yaml 不带任何口令兜底，缺环境变量会在启动时直接失败。
+spring:
+  data:
+    redis:
+      password: smartledge
+  datasource:
+    password: smartledge
+  rabbitmq:
+    username: smartledge
+    password: smartledge
+app:
+  manage:
+    minio:
+      access-key: smartledge
+      secret-key: smartledge123
+    pgvector:
+      password: smartledge
+    elasticsearch:
+      password: elastic

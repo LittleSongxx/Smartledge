@@ -65,6 +65,23 @@ CREATE TABLE IF NOT EXISTS smartledge_chat_memory_summary (
     KEY idx_smartledge_chat_memory_summary_edit_time (edit_time)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='业务对话长期记忆摘要快照表';
 
+CREATE TABLE IF NOT EXISTS smartledge_chat_exchange_feedback (
+                                                                id BIGINT NOT NULL COMMENT '主键id',
+                                                                dialogue_code VARCHAR(64) NOT NULL COMMENT '所属业务会话编号',
+    exchange_id BIGINT NOT NULL COMMENT '被评价的轮次id（复用 smartledge_chat_exchange.id）',
+    user_id BIGINT NOT NULL COMMENT '评价用户id（与会话归属一致）',
+    tenant_id BIGINT NOT NULL DEFAULT '1' COMMENT '所属租户id',
+    rating TINYINT NOT NULL COMMENT '评价 1:有帮助 -1:没有帮助',
+    comment VARCHAR(500) DEFAULT NULL COMMENT '可选补充说明',
+    create_time DATETIME DEFAULT NULL COMMENT '创建时间',
+    edit_time DATETIME DEFAULT NULL COMMENT '编辑时间',
+    status TINYINT(1) DEFAULT '1' COMMENT '1:正常 0:删除',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_smartledge_chat_exchange_feedback_user (exchange_id, user_id),
+    KEY idx_smartledge_chat_exchange_feedback_dialogue (dialogue_code),
+    KEY idx_smartledge_chat_exchange_feedback_tenant (tenant_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='业务对话轮次用户反馈表（质量回路的线上数据入口）';
+
 CREATE TABLE IF NOT EXISTS smartledge_long_term_memory (
     id                      BIGINT       NOT NULL COMMENT '主键id',
     tenant_id               BIGINT       NOT NULL DEFAULT '1' COMMENT '所属租户id',
@@ -602,25 +619,6 @@ CREATE TABLE IF NOT EXISTS `smartledge_kg_evidence` (
     KEY `idx_kg_evidence_chunk` (`chunk_id`),
     KEY `idx_kg_evidence_parent_block` (`parent_block_id`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='GraphRAG证据表';
-
-CREATE TABLE IF NOT EXISTS `smartledge_kg_community` (
-                                                          `id` bigint NOT NULL COMMENT '主键id',
-                                                          `document_id` bigint NOT NULL COMMENT '文档id',
-                                                          `task_id` bigint NOT NULL COMMENT '索引任务id',
-                                                          `community_no` int NOT NULL COMMENT '图谱社区序号',
-                                                          `title` varchar(500) NOT NULL COMMENT '图谱社区标题',
-    `summary` longtext COMMENT '图谱社区摘要',
-    `entity_ids_json` text COMMENT '社区实体id JSON数组',
-    `relation_ids_json` text COMMENT '社区关系id JSON数组',
-    `evidence_ids_json` text COMMENT '社区证据id JSON数组',
-    `metadata_json` text COMMENT '社区扩展元数据JSON',
-    `create_time` datetime DEFAULT NULL COMMENT '创建时间',
-    `edit_time` datetime DEFAULT NULL COMMENT '编辑时间',
-    `status` tinyint(1) DEFAULT '1' COMMENT '1:正常 0:删除',
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_kg_community_task_no` (`task_id`, `community_no`),
-    KEY `idx_kg_community_document_task` (`document_id`, `task_id`)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='GraphRAG社区摘要表';
 
 CREATE TABLE IF NOT EXISTS `smartledge_kg_canonical_entity_group` (
                                                                        `id` bigint NOT NULL COMMENT '主键id',

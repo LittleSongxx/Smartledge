@@ -9,6 +9,7 @@ import org.smartledge.ai.chatagent.model.SearchReference;
 import org.smartledge.ai.chatagent.support.RestClientFactorySupport;
 import org.smartledge.ai.chatagent.support.StreamEventWriter;
 import org.smartledge.ai.chatagent.support.TimeSensitiveQueryHelper;
+import org.smartledge.ai.chatagent.support.ToolQuerySanitizer;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
@@ -74,9 +75,16 @@ public class TavilySearchTool implements AgentTool {
     public TavilySearchToolResult search(TavilySearchRequest request, AgentToolContext toolContext) {
 
         toolContext.checkActive();
-        String rawQuery = request != null && StrUtil.isNotBlank(request.getQuery()) ? request.getQuery().trim() : "";
+        String rawQuery = request != null && StrUtil.isNotBlank(request.getQuery())
+            ? ToolQuerySanitizer.sanitize(request.getQuery())
+            : "";
         if (StrUtil.isBlank(rawQuery)) {
             throw new IllegalArgumentException("query 不能为空");
+        }
+        boolean suspiciousQuery = ToolQuerySanitizer.looksInjected(rawQuery);
+        if (suspiciousQuery) {
+            // 不阻断：语义仍按普通搜索词处理，但把可疑话术暴露到观测，便于回溯文档诱导。
+            log.warn("Tavily 检索词包含疑似提示注入话术，已按普通搜索词处理: {}", rawQuery);
         }
         if (!properties.isEnabled()) {
             throw new IllegalStateException("Tavily 搜索工具当前已禁用");
@@ -90,7 +98,7 @@ public class TavilySearchTool implements AgentTool {
         ChatToolTrace toolTrace = registerToolTrace(toolContext, ChatToolTrace.builder()
             .toolName("tavily_search")
             .status("RUNNING")
-            .inputSummary(rawQuery)
+            .inputSummary(suspiciousQuery ? rawQuery + "（含疑似提示注入话术，已按普通搜索词处理）" : rawQuery)
             .topic(topic)
             .build());
         markToolUsed(toolContext, "tavily_search");

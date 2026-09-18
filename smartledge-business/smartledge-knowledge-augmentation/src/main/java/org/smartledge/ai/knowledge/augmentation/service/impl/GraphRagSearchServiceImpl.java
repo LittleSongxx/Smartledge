@@ -5,11 +5,9 @@ import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
-import org.smartledge.ai.knowledge.augmentation.data.SuperAgentKgCommunity;
 import org.smartledge.ai.knowledge.augmentation.data.SuperAgentKgEntity;
 import org.smartledge.ai.knowledge.augmentation.data.SuperAgentKgEvidence;
 import org.smartledge.ai.knowledge.augmentation.data.SuperAgentKgRelation;
-import org.smartledge.ai.knowledge.augmentation.mapper.SuperAgentKgCommunityMapper;
 import org.smartledge.ai.knowledge.augmentation.mapper.SuperAgentKgEntityMapper;
 import org.smartledge.ai.knowledge.augmentation.mapper.SuperAgentKgEvidenceMapper;
 import org.smartledge.ai.knowledge.augmentation.mapper.SuperAgentKgRelationMapper;
@@ -60,7 +58,6 @@ public class GraphRagSearchServiceImpl implements GraphRagSearchService {
     private static final double ADVISOR_CONFIDENCE_THRESHOLD = 0.58D;
     private static final int CATALOG_ENTITY_LIMIT = 80;
     private static final int CATALOG_RELATION_LIMIT = 120;
-    private static final int CATALOG_COMMUNITY_LIMIT = 40;
     private static final String JAVA_QUERY_PROFILE_SOURCE = "java.graph_query_profile.v2";
     private static final String ADVISOR_QUERY_PROFILE_SOURCE = "llm.controlled.query_plan.v1";
     private final SuperAgentKgEntityMapper entityMapper;
@@ -68,8 +65,6 @@ public class GraphRagSearchServiceImpl implements GraphRagSearchService {
     private final SuperAgentKgRelationMapper relationMapper;
 
     private final SuperAgentKgEvidenceMapper evidenceMapper;
-
-    private final SuperAgentKgCommunityMapper communityMapper;
 
     private final ObjectMapper objectMapper;
 
@@ -83,7 +78,6 @@ public class GraphRagSearchServiceImpl implements GraphRagSearchService {
     public GraphRagSearchServiceImpl(SuperAgentKgEntityMapper entityMapper,
                                      SuperAgentKgRelationMapper relationMapper,
                                      SuperAgentKgEvidenceMapper evidenceMapper,
-                                     SuperAgentKgCommunityMapper communityMapper,
                                      ObjectMapper objectMapper,
                                      ObjectProvider<GraphRagQueryPlanAdvisor> queryPlanAdvisorProvider,
                                      ObjectProvider<GraphRagCrossDocumentIndexService> crossDocumentIndexServiceProvider,
@@ -92,7 +86,6 @@ public class GraphRagSearchServiceImpl implements GraphRagSearchService {
             entityMapper,
             relationMapper,
             evidenceMapper,
-            communityMapper,
             objectMapper,
             queryPlanAdvisorProvider == null ? null : queryPlanAdvisorProvider.getIfAvailable(),
             crossDocumentIndexServiceProvider == null ? null : crossDocumentIndexServiceProvider.getIfAvailable(),
@@ -103,22 +96,19 @@ public class GraphRagSearchServiceImpl implements GraphRagSearchService {
     public GraphRagSearchServiceImpl(SuperAgentKgEntityMapper entityMapper,
                                      SuperAgentKgRelationMapper relationMapper,
                                      SuperAgentKgEvidenceMapper evidenceMapper,
-                                     SuperAgentKgCommunityMapper communityMapper,
                                      ObjectMapper objectMapper) {
-        this(entityMapper, relationMapper, evidenceMapper, communityMapper, objectMapper, (GraphRagQueryPlanAdvisor) null);
+        this(entityMapper, relationMapper, evidenceMapper, objectMapper, (GraphRagQueryPlanAdvisor) null);
     }
 
     GraphRagSearchServiceImpl(SuperAgentKgEntityMapper entityMapper,
                               SuperAgentKgRelationMapper relationMapper,
                               SuperAgentKgEvidenceMapper evidenceMapper,
-                              SuperAgentKgCommunityMapper communityMapper,
                               ObjectMapper objectMapper,
                               GraphRagQueryPlanAdvisor queryPlanAdvisor) {
         this(
             entityMapper,
             relationMapper,
             evidenceMapper,
-            communityMapper,
             objectMapper,
             queryPlanAdvisor,
             null,
@@ -129,7 +119,6 @@ public class GraphRagSearchServiceImpl implements GraphRagSearchService {
     GraphRagSearchServiceImpl(SuperAgentKgEntityMapper entityMapper,
                               SuperAgentKgRelationMapper relationMapper,
                               SuperAgentKgEvidenceMapper evidenceMapper,
-                              SuperAgentKgCommunityMapper communityMapper,
                               ObjectMapper objectMapper,
                               GraphRagQueryPlanAdvisor queryPlanAdvisor,
                               GraphRagCrossDocumentIndexService crossDocumentIndexService,
@@ -137,7 +126,6 @@ public class GraphRagSearchServiceImpl implements GraphRagSearchService {
         this.entityMapper = entityMapper;
         this.relationMapper = relationMapper;
         this.evidenceMapper = evidenceMapper;
-        this.communityMapper = communityMapper;
         this.objectMapper = objectMapper;
         this.queryPlanAdvisor = queryPlanAdvisor;
         this.crossDocumentIndexService = crossDocumentIndexService;
@@ -175,10 +163,9 @@ public class GraphRagSearchServiceImpl implements GraphRagSearchService {
         Map<Long, SuperAgentKgEntity> entityMap = allEntities.stream()
             .collect(Collectors.toMap(SuperAgentKgEntity::getId, item -> item, (left, right) -> left, LinkedHashMap::new));
         GraphRagCrossDocumentIndex crossDocumentIndex = loadCrossDocumentIndex(documentIds, taskIds, allEntities, List.of(), List.of());
-        List<SuperAgentKgCommunity> allCommunities = listCommunities(documentIds, taskIds);
         List<SuperAgentKgRelation> loadedRelations = List.of();
         queryProfile = withJavaFocusEntities(queryProfile, allEntities, normalizedQuestion);
-        if (shouldAskAdvisor(question, queryProfile, allEntities, allCommunities)) {
+        if (shouldAskAdvisor(question, queryProfile, allEntities)) {
             loadedRelations = listAllRelations(documentIds, taskIds);
             crossDocumentIndex = ensureCrossDocumentIndex(documentIds, taskIds, allEntities, loadedRelations, List.of(), crossDocumentIndex);
             AdvisorProfileApplication advisorApplication = applyAdvisorProfile(
@@ -186,7 +173,6 @@ public class GraphRagSearchServiceImpl implements GraphRagSearchService {
                 queryProfile,
                 allEntities,
                 loadedRelations,
-                allCommunities,
                 topK,
                 maxHops
             );
@@ -206,10 +192,7 @@ public class GraphRagSearchServiceImpl implements GraphRagSearchService {
         QueryProfile effectiveQueryProfile = queryProfile;
         String effectiveNormalizedQuestion = normalizedQuestion;
         List<String> effectiveTerms = terms;
-        List<GraphRagSearchResult> communityResults = new ArrayList<>(
-            searchCommunityReports(documentIds, taskIds, allCommunities, topK, effectiveNormalizedQuestion, effectiveTerms,
-                effectiveQueryProfile)
-        );
+        List<GraphRagSearchResult> communityResults = new ArrayList<>();
         List<ScoredEntity> seedEntities = allEntities.stream()
             .map(entity -> new ScoredEntity(entity, scoreEntity(entity, effectiveNormalizedQuestion, effectiveTerms,
                 effectiveQueryProfile)))
@@ -452,64 +435,6 @@ public class GraphRagSearchServiceImpl implements GraphRagSearchService {
             relations == null ? List.of() : relations,
             evidences == null ? List.of() : evidences
         );
-    }
-
-    private List<GraphRagSearchResult> searchCommunityReports(List<Long> documentIds,
-                                                              List<Long> taskIds,
-                                                              List<SuperAgentKgCommunity> communities,
-                                                              int topK,
-                                                              String normalizedQuestion,
-                                                              List<String> terms,
-                                                              QueryProfile queryProfile) {
-        if (communities.isEmpty()) {
-            return List.of();
-        }
-        List<ScoredCommunity> scoredCommunities = communities.stream()
-            .map(community -> new ScoredCommunity(community, scoreCommunity(community, normalizedQuestion, terms, queryProfile)))
-            .filter(item -> item.score() > 0D)
-            .sorted(Comparator.comparingDouble(ScoredCommunity::score).reversed())
-            .limit(Math.max(topK, 3))
-            .toList();
-        if (scoredCommunities.isEmpty()) {
-            return List.of();
-        }
-
-        Set<Long> evidenceIds = scoredCommunities.stream()
-            .flatMap(item -> readLongList(item.community().getEvidenceIdsJson()).stream())
-            .collect(Collectors.toCollection(LinkedHashSet::new));
-        if (evidenceIds.isEmpty()) {
-            return List.of();
-        }
-        Map<Long, SuperAgentKgEvidence> evidenceMap = listEvidencesByIds(documentIds, taskIds, evidenceIds).stream()
-            .collect(Collectors.toMap(SuperAgentKgEvidence::getId, item -> item, (left, right) -> left, LinkedHashMap::new));
-
-        List<GraphRagSearchResult> results = new ArrayList<>();
-        for (ScoredCommunity scoredCommunity : scoredCommunities) {
-            SuperAgentKgCommunity community = scoredCommunity.community();
-            SuperAgentKgEvidence representativeEvidence = readLongList(community.getEvidenceIdsJson()).stream()
-                .map(evidenceMap::get)
-                .filter(Objects::nonNull)
-                .findFirst()
-                .orElse(null);
-            if (representativeEvidence == null) {
-                continue;
-            }
-            double rankBoost = communityRankBoost(community);
-            GraphRagSearchResult.GraphRagSearchResultBuilder builder = baseResult(representativeEvidence)
-                .communityId(community.getId())
-                .communityTitle(community.getTitle())
-                .communitySummary(community.getSummary())
-                .evidenceId(representativeEvidence.getId())
-                .quoteText(representativeEvidence.getQuoteText())
-                .graphPath("社区报告：" + StrUtil.blankToDefault(community.getTitle(), "未命名图谱社区"))
-                .hopCount(0)
-                .rankBoost(rankBoost)
-                .score(scoredCommunity.score()
-                    + graphRankScore(rankBoost)
-                    + evidenceBoost(representativeEvidence.getQuoteText(), terms));
-            results.add(withQueryProfile(builder, queryProfile).build());
-        }
-        return results;
     }
 
     private List<GraphRagSearchResult> searchCrossDocumentCommunities(GraphRagCrossDocumentIndex index,
@@ -806,16 +731,6 @@ public class GraphRagSearchServiceImpl implements GraphRagSearchService {
             return loadedRelations;
         }
         return listAllRelations(documentIds, taskIds);
-    }
-
-    private List<SuperAgentKgCommunity> listCommunities(List<Long> documentIds, List<Long> taskIds) {
-        LambdaQueryWrapper<SuperAgentKgCommunity> wrapper = new LambdaQueryWrapper<SuperAgentKgCommunity>()
-            .in(SuperAgentKgCommunity::getDocumentId, documentIds)
-            .eq(SuperAgentKgCommunity::getStatus, BusinessStatus.YES.getCode());
-        if (CollUtil.isNotEmpty(taskIds)) {
-            wrapper.in(SuperAgentKgCommunity::getTaskId, taskIds);
-        }
-        return communityMapper.selectList(wrapper);
     }
 
     private List<SuperAgentKgEvidence> listEvidences(List<Long> documentIds,
@@ -1682,45 +1597,6 @@ public class GraphRagSearchServiceImpl implements GraphRagSearchService {
         return Math.min(0.32D, boost);
     }
 
-    private double scoreCommunity(SuperAgentKgCommunity community,
-                                  String normalizedQuestion,
-                                  List<String> terms,
-                                  QueryProfile queryProfile) {
-        String title = normalize(community.getTitle());
-        String summary = normalize(community.getSummary());
-        if (title.isBlank() && summary.isBlank()) {
-            return 0D;
-        }
-        double score = 0D;
-        if (queryProfile.communityIds().contains(community.getId())) {
-            score += 0.92D;
-        }
-        if (queryProfile.communityQuestion()) {
-            score += 0.12D;
-        }
-        if (StrUtil.isNotBlank(title) && normalizedQuestion.contains(title)) {
-            score += 0.8D;
-        }
-        for (String term : terms) {
-            String normalizedTerm = normalize(term);
-            if (normalizedTerm.length() < 2) {
-                continue;
-            }
-            if (title.contains(normalizedTerm)) {
-                score += 0.28D;
-            }
-            if (summary.contains(normalizedTerm)) {
-                score += 0.18D;
-            }
-        }
-        return Math.min(score, 1.2D);
-    }
-
-    private double communityRankBoost(SuperAgentKgCommunity community) {
-        Map<String, Object> metadata = readMap(community == null ? null : community.getMetadataJson());
-        return numberValue(metadata.get("rankBoost"), 0D);
-    }
-
     private CommunityRankProfile rankCrossDocumentCommunity(CrossDocumentCommunity community,
                                                             Map<String, RelationGroup> relationGroupByKey,
                                                             Map<Long, SuperAgentKgEvidence> evidenceMap,
@@ -2077,21 +1953,19 @@ public class GraphRagSearchServiceImpl implements GraphRagSearchService {
 
     private boolean shouldAskAdvisor(String question,
                                      QueryProfile queryProfile,
-                                     List<SuperAgentKgEntity> entities,
-                                     List<SuperAgentKgCommunity> communities) {
+                                     List<SuperAgentKgEntity> entities) {
         return queryPlanAdvisor != null
             && StrUtil.isNotBlank(question)
-            && (CollUtil.isNotEmpty(entities) || CollUtil.isNotEmpty(communities));
+            && CollUtil.isNotEmpty(entities);
     }
 
     private AdvisorProfileApplication applyAdvisorProfile(String question,
                                                           QueryProfile baseProfile,
                                                           List<SuperAgentKgEntity> entities,
                                                           List<SuperAgentKgRelation> relations,
-                                                          List<SuperAgentKgCommunity> communities,
                                                           int topK,
                                                           int requestedMaxHops) {
-        GraphRagQueryCatalog catalog = buildQueryCatalog(entities, relations, communities, topK);
+        GraphRagQueryCatalog catalog = buildQueryCatalog(entities, relations, topK);
         Optional<GraphRagQueryPlanAdvice> advice;
         try {
             advice = queryPlanAdvisor.advise(question, catalog);
@@ -2105,7 +1979,7 @@ public class GraphRagSearchServiceImpl implements GraphRagSearchService {
         if (advice.isEmpty()) {
             return new AdvisorProfileApplication(baseProfile, false);
         }
-        QueryProfile advisorProfile = validateAdvice(question, advice.get(), entities, relations, communities, requestedMaxHops);
+        QueryProfile advisorProfile = validateAdvice(question, advice.get(), entities, relations, requestedMaxHops);
         if (advisorProfile == null) {
             return new AdvisorProfileApplication(baseProfile, false);
         }
@@ -2220,13 +2094,11 @@ public class GraphRagSearchServiceImpl implements GraphRagSearchService {
 
     private GraphRagQueryCatalog buildQueryCatalog(List<SuperAgentKgEntity> entities,
                                                    List<SuperAgentKgRelation> relations,
-                                                   List<SuperAgentKgCommunity> communities,
                                                    int topK) {
         Map<Long, SuperAgentKgEntity> entityMap = entities.stream()
             .collect(Collectors.toMap(SuperAgentKgEntity::getId, item -> item, (left, right) -> left, LinkedHashMap::new));
         int entityLimit = Math.max(CATALOG_ENTITY_LIMIT, topK * 8);
         int relationLimit = Math.max(CATALOG_RELATION_LIMIT, topK * 12);
-        int communityLimit = Math.max(CATALOG_COMMUNITY_LIMIT, topK * 4);
         return GraphRagQueryCatalog.builder()
             .entities(entities.stream()
                 .filter(Objects::nonNull)
@@ -2269,16 +2141,6 @@ public class GraphRagSearchServiceImpl implements GraphRagSearchService {
                         .build();
                 })
                 .toList())
-            .communities(communities.stream()
-                .filter(Objects::nonNull)
-                .sorted(Comparator.comparingDouble(this::communityRankBoost).reversed())
-                .limit(communityLimit)
-                .map(community -> GraphRagQueryCatalog.CommunityItem.builder()
-                    .communityId(community.getId())
-                    .title(community.getTitle())
-                    .summary(community.getSummary())
-                    .build())
-                .toList())
             .build();
     }
 
@@ -2286,7 +2148,6 @@ public class GraphRagSearchServiceImpl implements GraphRagSearchService {
                                         GraphRagQueryPlanAdvice advice,
                                         List<SuperAgentKgEntity> entities,
                                         List<SuperAgentKgRelation> relations,
-                                        List<SuperAgentKgCommunity> communities,
                                         int requestedMaxHops) {
         if (advice == null || !Boolean.TRUE.equals(advice.getGraphQuery())) {
             return null;
@@ -2313,10 +2174,6 @@ public class GraphRagSearchServiceImpl implements GraphRagSearchService {
             .map(SuperAgentKgRelation::getId)
             .filter(Objects::nonNull)
             .collect(Collectors.toCollection(LinkedHashSet::new));
-        Set<Long> allowedCommunityIds = communities.stream()
-            .map(SuperAgentKgCommunity::getId)
-            .filter(Objects::nonNull)
-            .collect(Collectors.toCollection(LinkedHashSet::new));
 
         String queryIntent = normalizeQueryIntent(advice.getQueryIntent());
         LinkedHashSet<String> genericIntentTerms = normalizeEntitiesFromQuery(advice.getGenericIntentTerms(), question);
@@ -2327,7 +2184,7 @@ public class GraphRagSearchServiceImpl implements GraphRagSearchService {
         LinkedHashSet<String> relationTypes = normalizeAllowedStrings(advice.getRelationTypes(), allowedRelationTypes);
         LinkedHashSet<Long> entityIds = normalizeAllowedLongs(advice.getEntityIds(), allowedEntityIds);
         LinkedHashSet<Long> relationIds = normalizeAllowedLongs(advice.getRelationIds(), allowedRelationIds);
-        LinkedHashSet<Long> communityIds = normalizeAllowedLongs(advice.getCommunityIds(), allowedCommunityIds);
+        LinkedHashSet<Long> communityIds = new LinkedHashSet<>();
         LinkedHashSet<String> entityNames = normalizeAllowedEntityNames(advice.getEntityNames(), entities);
         LinkedHashSet<String> entitiesFromQuery = normalizeEntitiesFromQuery(advice.getEntitiesFromQuery(), question);
         focusEntities.addAll(entitiesFromQuery);
@@ -2661,9 +2518,6 @@ public class GraphRagSearchServiceImpl implements GraphRagSearchService {
     }
 
     private record ScoredRelation(SuperAgentKgRelation relation, double score) {
-    }
-
-    private record ScoredCommunity(SuperAgentKgCommunity community, double score) {
     }
 
     private record ScoredCrossDocumentCommunity(CrossDocumentCommunity community, CommunityRankProfile rankProfile) {

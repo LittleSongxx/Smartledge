@@ -52,8 +52,6 @@ public class DocumentRagSnapshotVo {
 
     private List<KgRelationItem> kgRelations;
 
-    private List<KgCommunityItem> kgCommunities;
-
     private KgGraphItem kgGraph;
 
     private List<RaptorNodeItem> raptorNodes;
@@ -537,22 +535,6 @@ public class DocumentRagSnapshotVo {
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class KgCommunityItem {
-
-        private Long communityId;
-
-        private Integer communityNo;
-
-        private String title;
-
-        private String summary;
-
-        private String entityIdsJson;
-    }
-
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
     public static class KgGraphItem {
 
         private List<MetricItem> metrics;
@@ -560,8 +542,6 @@ public class DocumentRagSnapshotVo {
         private List<KgGraphNodeItem> nodes;
 
         private List<KgGraphEdgeItem> edges;
-
-        private List<KgGraphCommunityItem> communities;
 
         private List<KgGraphEvidenceItem> evidences;
     }
@@ -580,8 +560,6 @@ public class DocumentRagSnapshotVo {
         private String entityType;
 
         private String description;
-
-        private Long communityId;
 
         private Double pagerank;
 
@@ -630,28 +608,6 @@ public class DocumentRagSnapshotVo {
         private Integer evidenceCount;
 
         private String qualityLevel;
-    }
-
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class KgGraphCommunityItem {
-
-        private Long communityId;
-
-        private Integer communityNo;
-
-        private String title;
-
-        private String summary;
-
-        private Integer entityCount;
-
-        private Integer relationCount;
-
-        private Integer evidenceCount;
-
-        private String rankScore;
     }
 
     @Data

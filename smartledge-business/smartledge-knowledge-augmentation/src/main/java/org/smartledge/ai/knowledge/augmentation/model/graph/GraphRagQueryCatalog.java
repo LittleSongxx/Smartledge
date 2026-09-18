@@ -20,9 +20,6 @@ public class GraphRagQueryCatalog {
     @Builder.Default
     private List<RelationItem> relations = new ArrayList<>();
 
-    @Builder.Default
-    private List<CommunityItem> communities = new ArrayList<>();
-
     @Data
     @Builder
     @NoArgsConstructor
@@ -62,18 +59,5 @@ public class GraphRagQueryCatalog {
         private String targetEntityName;
 
         private String description;
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class CommunityItem {
-
-        private Long communityId;
-
-        private String title;
-
-        private String summary;
     }
 }

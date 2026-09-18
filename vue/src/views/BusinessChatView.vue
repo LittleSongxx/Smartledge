@@ -24,6 +24,7 @@ import { clearChatAuth, hasChatPermission } from '../utils/chatAuth'
 import { PORTFOLIO_DEMO_PERMISSION } from '../utils/demoAccounts'
 import { buildChatRouteExplain, buildRouteTraceLookup } from '../utils/knowledgeRoute'
 import {
+  hasRunningExchange,
   isNearScrollBottom,
   mergeAssistantStreamEvent,
   shouldApplyStreamEvent,
@@ -207,6 +208,22 @@ function createAssistantMessage(question) {
   }
 }
 
+async function submitExchangeFeedback(message, rating) {
+  const conversationId = currentConversationId.value
+  if (!conversationId || !message?.exchangeId || message.feedbackPending) return
+  if (message.feedbackRating === rating) return
+
+  message.feedbackPending = true
+  try {
+    await chatApi.submitExchangeFeedback({ conversationId, exchangeId: message.exchangeId, rating })
+    updateAssistantMessage(message.id, (item) => ({ ...item, feedbackRating: rating }))
+  } catch (error) {
+    pageError.value = normalizeError(error, '提交反馈失败')
+  } finally {
+    message.feedbackPending = false
+  }
+}
+
 function mapExchangesToMessages(exchanges = [], routeTraceLookup = {}) {
   return exchanges.flatMap((exchange) => {
     const createdAt = exchange.createdAt || exchange.createTime || null
@@ -216,6 +233,7 @@ function mapExchangesToMessages(exchanges = [], routeTraceLookup = {}) {
       {
         id: `exchange-${exchange.exchangeId}-assistant`,
         role: 'assistant',
+        exchangeId: exchange.exchangeId,
         question: exchange.question || '',
         content: exchange.answer || '',
         thinkingSteps: exchange.thinkingSteps || [],
@@ -224,6 +242,8 @@ function mapExchangesToMessages(exchanges = [], routeTraceLookup = {}) {
         usedTools: exchange.usedTools || [],
         status: exchange.status || '',
         statusText: '',
+        feedbackRating: exchange.feedbackRating || null,
+        feedbackComment: exchange.feedbackComment || null,
         errorMessage: exchange.errorMessage || '',
         firstResponseTimeMs: exchange.firstResponseTimeMs,
         totalResponseTimeMs: exchange.totalResponseTimeMs,
@@ -380,6 +400,7 @@ async function loadConversation(conversationId) {
     displayMessages.value = mapExchangesToMessages(session.exchanges || [], routeTraceLookup)
     upsertSession(session)
     applySessionScope(session)
+    syncRunningExchangePolling(session)
     mobileHistoryOpen.value = false
     conversationLoaded = true
   } catch (error) {
@@ -389,6 +410,71 @@ async function loadConversation(conversationId) {
     if (conversationRequestGuard.isCurrent(requestId)) loadingConversation.value = false
   }
   if (conversationLoaded) await scrollToBottom({ force: true })
+}
+
+const RUNNING_EXCHANGE_POLL_INTERVAL_MILLIS = 2000
+const RUNNING_EXCHANGE_POLL_MAX_MILLIS = 5 * 60 * 1000
+const RUNNING_EXCHANGE_POLL_MAX_FAILURES = 3
+let runningExchangePollTimer = null
+let runningExchangePollConversationId = ''
+let runningExchangePollStartedAt = 0
+let runningExchangePollFailures = 0
+
+/**
+ * 运行中轮次的轮询恢复：会话里存在 RUNNING 轮次且本地没有 SSE 时，
+ * 用 session/detail 快照追进度（服务端 overlayRuntimeSnapshot 会叠内存 answerBuffer）。
+ * 本地流式、会话切换、终态或连续失败时停止；对账 Job 保证后台孤儿轮次最终也有终态。
+ */
+function stopRunningExchangePolling() {
+  if (runningExchangePollTimer) {
+    clearInterval(runningExchangePollTimer)
+    runningExchangePollTimer = null
+  }
+  runningExchangePollConversationId = ''
+  runningExchangePollStartedAt = 0
+  runningExchangePollFailures = 0
+}
+
+function syncRunningExchangePolling(session) {
+  const conversationId = currentConversationId.value
+  const shouldPoll = !isStreaming.value
+    && Boolean(conversationId)
+    && hasRunningExchange(session?.exchanges)
+  if (!shouldPoll) {
+    stopRunningExchangePolling()
+    return
+  }
+  if (runningExchangePollTimer && runningExchangePollConversationId === conversationId) return
+  stopRunningExchangePolling()
+  runningExchangePollConversationId = conversationId
+  runningExchangePollStartedAt = Date.now()
+  runningExchangePollTimer = setInterval(pollRunningExchange, RUNNING_EXCHANGE_POLL_INTERVAL_MILLIS)
+}
+
+async function pollRunningExchange() {
+  const conversationId = runningExchangePollConversationId
+  if (!conversationId || conversationId !== currentConversationId.value || isStreaming.value) {
+    stopRunningExchangePolling()
+    return
+  }
+  if (Date.now() - runningExchangePollStartedAt > RUNNING_EXCHANGE_POLL_MAX_MILLIS) {
+    stopRunningExchangePolling()
+    return
+  }
+  try {
+    const session = await chatApi.getSession(conversationId)
+    if (conversationId !== currentConversationId.value || conversationId !== runningExchangePollConversationId) return
+    displayMessages.value = mapExchangesToMessages(session.exchanges || [])
+    upsertSession(session)
+    runningExchangePollFailures = 0
+    if (!hasRunningExchange(session.exchanges)) stopRunningExchangePolling()
+    if (isFollowingOutput.value) await scrollToBottom()
+  } catch (error) {
+    runningExchangePollFailures += 1
+    if (runningExchangePollFailures >= RUNNING_EXCHANGE_POLL_MAX_FAILURES) {
+      stopRunningExchangePolling()
+    }
+  }
 }
 
 function logout() {
@@ -414,6 +500,7 @@ async function deleteConversation(conversationId) {
 }
 
 function resetConversationKeepingScope() {
+  stopRunningExchangePolling()
   currentConversationId.value = ''
   displayMessages.value = []
   userInput.value = ''
@@ -567,6 +654,7 @@ async function sendMessage(presetQuestion) {
   isStreaming.value = true
   isStopping.value = false
   isFollowingOutput.value = true
+  stopRunningExchangePolling()
   if (!presetQuestion) {
     userInput.value = ''
     resizeComposer()
@@ -692,6 +780,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  stopRunningExchangePolling()
   activeStreamToken.value = null
   currentStreamHandle.value?.controller?.abort()
 })
@@ -826,6 +915,7 @@ onBeforeUnmount(() => {
             :show-recommendations="message.id === latestAssistantDisplayId"
             @recommend="sendMessage"
             @retry="sendMessage"
+            @feedback="(rating) => submitExchangeFeedback(message, rating)"
           />
         </div>
 

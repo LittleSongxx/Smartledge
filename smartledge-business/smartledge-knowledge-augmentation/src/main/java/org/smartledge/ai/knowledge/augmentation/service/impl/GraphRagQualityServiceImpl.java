@@ -1,15 +1,12 @@
 package org.smartledge.ai.knowledge.augmentation.service.impl;
 
-import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.smartledge.ai.knowledge.augmentation.data.SuperAgentKgCommunity;
 import org.smartledge.ai.knowledge.augmentation.data.SuperAgentKgEntity;
 import org.smartledge.ai.knowledge.augmentation.data.SuperAgentKgEvidence;
 import org.smartledge.ai.knowledge.augmentation.data.SuperAgentKgRelation;
-import org.smartledge.ai.knowledge.augmentation.mapper.SuperAgentKgCommunityMapper;
 import org.smartledge.ai.knowledge.augmentation.mapper.SuperAgentKgEntityMapper;
 import org.smartledge.ai.knowledge.augmentation.mapper.SuperAgentKgEvidenceMapper;
 import org.smartledge.ai.knowledge.augmentation.mapper.SuperAgentKgRelationMapper;
@@ -38,19 +35,15 @@ public class GraphRagQualityServiceImpl implements GraphRagQualityService {
 
     private final SuperAgentKgEvidenceMapper evidenceMapper;
 
-    private final SuperAgentKgCommunityMapper communityMapper;
-
     private final ObjectMapper objectMapper;
 
     public GraphRagQualityServiceImpl(SuperAgentKgEntityMapper entityMapper,
                                       SuperAgentKgRelationMapper relationMapper,
                                       SuperAgentKgEvidenceMapper evidenceMapper,
-                                      SuperAgentKgCommunityMapper communityMapper,
                                       ObjectMapper objectMapper) {
         this.entityMapper = entityMapper;
         this.relationMapper = relationMapper;
         this.evidenceMapper = evidenceMapper;
-        this.communityMapper = communityMapper;
         this.objectMapper = objectMapper;
     }
 
@@ -62,8 +55,7 @@ public class GraphRagQualityServiceImpl implements GraphRagQualityService {
         List<SuperAgentKgEntity> entities = activeEntities(documentId, taskId);
         List<SuperAgentKgRelation> relations = activeRelations(documentId, taskId);
         List<SuperAgentKgEvidence> evidences = activeEvidences(documentId, taskId);
-        List<SuperAgentKgCommunity> communities = activeCommunities(documentId, taskId);
-        long graphItemCount = (long) entities.size() + relations.size() + communities.size();
+        long graphItemCount = (long) entities.size() + relations.size();
         if (graphItemCount == 0L && evidences.isEmpty()) {
             return GraphRagQualityReport.empty(documentId, taskId);
         }
@@ -96,33 +88,24 @@ public class GraphRagQualityServiceImpl implements GraphRagQualityService {
         }
         groundedEntityIds.remove(null);
 
-        long communityWithEvidenceCount = communities.stream()
-            .filter(community -> CollUtil.isNotEmpty(readLongList(community.getEvidenceIdsJson())))
-            .count();
         long rankedGraphItemCount = entities.stream().filter(this::hasRankBoost).count()
-            + relations.stream().filter(this::hasRankBoost).count()
-            + communities.stream().filter(this::hasRankBoost).count();
+            + relations.stream().filter(this::hasRankBoost).count();
         long controlledExtractionItemCount = entities.stream().filter(this::fromControlledExtraction).count()
             + relations.stream().filter(this::fromControlledExtraction).count()
             + evidences.stream().filter(this::fromControlledExtraction).count();
         long entityResolutionEnhancedCount = entities.stream()
             .filter(entity -> booleanMetadataValue(entity.getMetadataJson(), "entityResolutionEnhanced"))
             .count();
-        long communityReportEnhancedCount = communities.stream()
-            .filter(community -> booleanMetadataValue(community.getMetadataJson(), "communityReportEnhanced"))
-            .count();
 
         double entityCoverage = ratio(groundedEntityIds.size(), entities.size());
         double relationCoverage = ratio(groundedRelationIds.size(), relations.size());
         double evidenceCoverage = ratio(traceableEvidenceCount, evidences.size());
-        double communityCoverage = ratio(communityWithEvidenceCount, communities.size());
         double rankCoverage = ratio(rankedGraphItemCount, graphItemCount);
         double qualityScore = qualityScore(
             graphItemCount,
             scoreRatio(traceableEvidenceCount, evidences.size(), false),
             scoreRatio(groundedEntityIds.size(), entities.size(), true),
             scoreRatio(groundedRelationIds.size(), relations.size(), true),
-            scoreRatio(communityWithEvidenceCount, communities.size(), true),
             scoreRatio(rankedGraphItemCount, graphItemCount, true)
         );
         String level = qualityLevel(qualityScore);
@@ -136,34 +119,27 @@ public class GraphRagQualityServiceImpl implements GraphRagQualityService {
             .entityCount((long) entities.size())
             .relationCount((long) relations.size())
             .evidenceCount((long) evidences.size())
-            .communityCount((long) communities.size())
             .groundedEntityCount((long) groundedEntityIds.size())
             .groundedRelationCount((long) groundedRelationIds.size())
             .traceableEvidenceCount(traceableEvidenceCount)
-            .communityWithEvidenceCount(communityWithEvidenceCount)
             .rankedGraphItemCount(rankedGraphItemCount)
             .controlledExtractionItemCount(controlledExtractionItemCount)
             .entityResolutionEnhancedCount(entityResolutionEnhancedCount)
-            .communityReportEnhancedCount(communityReportEnhancedCount)
             .entityEvidenceCoverage(entityCoverage)
             .relationEvidenceCoverage(relationCoverage)
             .evidenceTraceabilityCoverage(evidenceCoverage)
-            .communityEvidenceCoverage(communityCoverage)
             .rankCoverage(rankCoverage)
             .signals(signals(
                 entities.size(),
                 relations.size(),
                 evidences.size(),
-                communities.size(),
                 graphItemCount,
                 traceableEvidenceCount,
                 groundedEntityIds.size(),
                 groundedRelationIds.size(),
-                communityWithEvidenceCount,
                 rankedGraphItemCount,
                 controlledExtractionItemCount,
-                entityResolutionEnhancedCount,
-                communityReportEnhancedCount
+                entityResolutionEnhancedCount
             ))
             .build();
     }
@@ -189,13 +165,6 @@ public class GraphRagQualityServiceImpl implements GraphRagQualityService {
             .eq(SuperAgentKgEvidence::getStatus, BusinessStatus.YES.getCode())));
     }
 
-    private List<SuperAgentKgCommunity> activeCommunities(Long documentId, Long taskId) {
-        return safeList(communityMapper.selectList(new LambdaQueryWrapper<SuperAgentKgCommunity>()
-            .eq(SuperAgentKgCommunity::getDocumentId, documentId)
-            .eq(SuperAgentKgCommunity::getTaskId, taskId)
-            .eq(SuperAgentKgCommunity::getStatus, BusinessStatus.YES.getCode())));
-    }
-
     private <T> List<T> safeList(List<T> values) {
         return values == null ? List.of() : values;
     }
@@ -218,10 +187,6 @@ public class GraphRagQualityServiceImpl implements GraphRagQualityService {
 
     private boolean hasRankBoost(SuperAgentKgRelation relation) {
         return relation != null && numberMetadataValue(relation.getMetadataJson(), "rankBoost") > 0D;
-    }
-
-    private boolean hasRankBoost(SuperAgentKgCommunity community) {
-        return community != null && numberMetadataValue(community.getMetadataJson(), "rankBoost") > 0D;
     }
 
     private boolean metadataContains(String metadataJson, String expectedValue) {
@@ -288,38 +253,6 @@ public class GraphRagQualityServiceImpl implements GraphRagQualityService {
         }
     }
 
-    private List<Long> readLongList(String json) {
-        if (StrUtil.isBlank(json)) {
-            return List.of();
-        }
-        try {
-            List<?> values = objectMapper.readValue(json, List.class);
-            List<Long> result = new ArrayList<>();
-            for (Object value : values) {
-                Long longValue = toLong(value);
-                if (longValue != null) {
-                    result.add(longValue);
-                }
-            }
-            return result;
-        }
-        catch (Exception exception) {
-            return List.of();
-        }
-    }
-
-    private Long toLong(Object value) {
-        if (value instanceof Number number) {
-            return number.longValue();
-        }
-        try {
-            return value == null ? null : Long.parseLong(String.valueOf(value));
-        }
-        catch (NumberFormatException exception) {
-            return null;
-        }
-    }
-
     private double ratio(long numerator, long denominator) {
         if (denominator <= 0L) {
             return 0D;
@@ -338,15 +271,13 @@ public class GraphRagQualityServiceImpl implements GraphRagQualityService {
                                 double evidenceCoverage,
                                 double entityCoverage,
                                 double relationCoverage,
-                                double communityCoverage,
                                 double rankCoverage) {
         if (graphItemCount <= 0L) {
             return 0D;
         }
-        return round(evidenceCoverage * 0.35D
-            + entityCoverage * 0.25D
-            + relationCoverage * 0.25D
-            + communityCoverage * 0.10D
+        return round(evidenceCoverage * 0.39D
+            + entityCoverage * 0.28D
+            + relationCoverage * 0.28D
             + rankCoverage * 0.05D);
     }
 
@@ -380,27 +311,23 @@ public class GraphRagQualityServiceImpl implements GraphRagQualityService {
     private List<GraphRagQualityReport.SignalItem> signals(int entityCount,
                                                            int relationCount,
                                                            int evidenceCount,
-                                                           int communityCount,
                                                            long graphItemCount,
                                                            long traceableEvidenceCount,
                                                            int groundedEntityCount,
                                                            int groundedRelationCount,
-                                                           long communityWithEvidenceCount,
                                                            long rankedGraphItemCount,
                                                            long controlledExtractionItemCount,
-                                                           long entityResolutionEnhancedCount,
-                                                           long communityReportEnhancedCount) {
+                                                           long entityResolutionEnhancedCount) {
         List<GraphRagQualityReport.SignalItem> result = new ArrayList<>();
         result.add(signal("证据追溯", traceableEvidenceCount, evidenceCount, "evidence 需要同时有 chunkId 和 quoteText。"));
         result.add(signal("实体证据覆盖", groundedEntityCount, entityCount, "实体需要通过 entity evidence 或 relation evidence 回到原文。"));
         result.add(signal("关系证据覆盖", groundedRelationCount, relationCount, "关系需要有可追溯的 relation evidence。"));
-        result.add(signal("社区证据覆盖", communityWithEvidenceCount, communityCount, "社区报告需要保留 evidenceIds。"));
-        result.add(signal("图谱 Rank 覆盖", rankedGraphItemCount, graphItemCount, "实体、关系、社区 metadata 应有 rankBoost。"));
-        long controlledTotal = controlledExtractionItemCount + entityResolutionEnhancedCount + communityReportEnhancedCount;
+        result.add(signal("图谱 Rank 覆盖", rankedGraphItemCount, graphItemCount, "实体、关系 metadata 应有 rankBoost。"));
+        long controlledTotal = controlledExtractionItemCount + entityResolutionEnhancedCount;
         result.add(GraphRagQualityReport.SignalItem.builder()
             .label("受控增强命中")
             .value(String.valueOf(controlledTotal))
-            .hint("extraction、entity resolution、community report 通过 Java 校验后的增强命中数。")
+            .hint("extraction、entity resolution 通过 Java 校验后的增强命中数。")
             .tone(controlledTotal > 0L ? "success" : "neutral")
             .build());
         return result;

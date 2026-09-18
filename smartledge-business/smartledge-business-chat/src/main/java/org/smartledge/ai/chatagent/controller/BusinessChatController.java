@@ -16,6 +16,7 @@ import org.smartledge.ai.chatagent.model.KnowledgeDocumentOptionView;
 import org.smartledge.ai.chatagent.model.RetrievalResultView;
 import org.smartledge.ai.chatagent.model.StageBenchmarkView;
 import org.smartledge.ai.chatagent.service.BusinessChatService;
+import org.smartledge.ai.chatagent.service.ChatExchangeFeedbackService;
 import org.smartledge.ai.rag.runtime.model.KnowledgeBaseOption;
 import org.smartledge.ai.chatagent.vo.ConversationResetVo;
 import org.smartledge.ai.chatagent.vo.ConversationSessionListVo;
@@ -39,6 +40,8 @@ import java.util.List;
 public class BusinessChatController {
 
     private final BusinessChatService businessChatService;
+
+    private final ChatExchangeFeedbackService chatExchangeFeedbackService;
 
     @PostMapping(value = "/stream", produces = "text/event-stream;charset=UTF-8")
     public Flux<String> stream(@Valid @RequestBody ChatRequestDto dto) {
@@ -68,6 +71,12 @@ public class BusinessChatController {
     @PostMapping("/exchange/detail")
     public ApiResponse<ConversationExchangeDetailView> exchange(@Valid @RequestBody ConversationExchangeDetailQueryDto dto) {
         return ApiResponse.ok(businessChatService.getExchangeDetail(dto.getConversationId(), dto.getExchangeId()));
+    }
+
+    @PostMapping("/exchange/feedback")
+    public ApiResponse<ChatExchangeFeedbackService.FeedbackSummary> feedback(
+            @Valid @RequestBody org.smartledge.ai.chatagent.dto.ChatExchangeFeedbackDto dto) {
+        return ApiResponse.ok(chatExchangeFeedbackService.submit(dto));
     }
 
     @PostMapping("/session/list")

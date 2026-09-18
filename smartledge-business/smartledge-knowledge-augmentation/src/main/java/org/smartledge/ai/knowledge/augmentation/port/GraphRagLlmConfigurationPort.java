@@ -11,10 +11,6 @@ public interface GraphRagLlmConfigurationPort {
         throw new IllegalStateException("GraphRAG extraction configuration provider is not available");
     }
 
-    default boolean communityReportEnabled() {
-        throw new IllegalStateException("GraphRAG community-report configuration provider is not available");
-    }
-
     default boolean entityResolutionEnabled() {
         throw new IllegalStateException("GraphRAG entity-resolution configuration provider is not available");
     }

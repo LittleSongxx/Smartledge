@@ -718,6 +718,7 @@ public class RaptorBuildServiceImpl implements RaptorBuildService {
             if (embeddings.size() != currentBatch.size()) {
                 throw new IllegalStateException("向量化模型返回的 RAPTOR 向量数量与节点数量不一致。");
             }
+            validateEmbeddingDimensions(embeddingModel, embeddings, currentBatchIndex);
             long upsertStartedNanos = System.nanoTime();
             batchUpsert(upsertSql, currentBatch, embeddings, embeddingModelName, vectorTenantId);
             log.info("RAPTOR 摘要向量化批次完成，batchIndex={}/{}, currentBatchSize={}, embeddingCostMillis={}, pgVectorCostMillis={}, batchCostMillis={}",
@@ -926,6 +927,21 @@ public class RaptorBuildServiceImpl implements RaptorBuildService {
         }
         vectorBuilder.append("]");
         return vectorBuilder.toString();
+    }
+
+    /** 写入前的最后一道维度闸门：适配器声明了维度时不允许维度漂移的向量进入 pgvector。 */
+    private static void validateEmbeddingDimensions(EmbeddingPort embeddingModel, List<float[]> embeddings, int batchIndex) {
+        int expected = embeddingModel.dimensions();
+        if (expected <= 0) {
+            return;
+        }
+        for (int index = 0; index < embeddings.size(); index++) {
+            float[] vector = embeddings.get(index);
+            if (vector == null || vector.length != expected) {
+                throw new IllegalStateException("RAPTOR embedding 批次 " + batchIndex + " 第 " + index
+                    + " 条维度与端口声明不一致：" + (vector == null ? "null" : vector.length) + "，期望 " + expected);
+            }
+        }
     }
 
     private List<Long> readLongList(String json) {

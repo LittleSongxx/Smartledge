@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS public.smartledge_document_embedding (
     source_block_ids TEXT,
     embedding_model VARCHAR(128),
     metadata_json JSONB DEFAULT '{}'::jsonb,
-    embedding VECTOR NOT NULL,
+    embedding VECTOR(1024) NOT NULL,
     create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     edit_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     status SMALLINT DEFAULT 1,
@@ -93,9 +93,15 @@ CREATE INDEX IF NOT EXISTS idx_smartledge_document_embedding_chunk_type
 CREATE INDEX IF NOT EXISTS idx_smartledge_document_embedding_status
     ON public.smartledge_document_embedding (status);
 
--- 当前第一期为了兼容不同 embedding 模型的维度变化，embedding 字段使用未固定维度的 VECTOR 类型。
--- 如果后续固定模型与维度，例如 1024 或 1536，
--- 可以把字段改成 VECTOR(1024/1536) 并补充 HNSW 或 IVF_FLAT 向量索引。
+-- 向量维度固定为 1024，与 application.yaml 的 app.ai.embedding.dimensions 是同一契约；两者必须一起改。
+-- 检索语句使用 `embedding <=> CAST(? AS vector)`（余弦距离），因此 ANN 索引必须用 vector_cosine_ops。
+-- 检索侧已开启 hnsw.iterative_scan=relaxed_order（见 PgVectorTenantOperations），配合 4 倍 over-fetch 截断。
+CREATE INDEX IF NOT EXISTS idx_document_embedding_hnsw_cosine
+    ON public.smartledge_document_embedding
+    USING hnsw (embedding vector_cosine_ops)
+    WITH (m = 16, ef_construction = 64);
+
+-- 存量库升级走 sql/表结构/迁移/S19-附加索引与向量维度-PostgresSql.sql（幂等，可重复执行）。
 
 CREATE TABLE IF NOT EXISTS public.smartledge_raptor_embedding (
                                                                    id BIGINT NOT NULL,
@@ -119,7 +125,7 @@ CREATE TABLE IF NOT EXISTS public.smartledge_raptor_embedding (
     questions TEXT,
     embedding_model VARCHAR(128),
     metadata_json JSONB DEFAULT '{}'::jsonb,
-    embedding VECTOR NOT NULL,
+    embedding VECTOR(1024) NOT NULL,
     create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     edit_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     status SMALLINT DEFAULT 1,
@@ -168,3 +174,8 @@ CREATE INDEX IF NOT EXISTS idx_smartledge_raptor_embedding_parent
 
 CREATE INDEX IF NOT EXISTS idx_smartledge_raptor_embedding_status
     ON public.smartledge_raptor_embedding (status);
+
+CREATE INDEX IF NOT EXISTS idx_raptor_embedding_hnsw_cosine
+    ON public.smartledge_raptor_embedding
+    USING hnsw (embedding vector_cosine_ops)
+    WITH (m = 16, ef_construction = 64);

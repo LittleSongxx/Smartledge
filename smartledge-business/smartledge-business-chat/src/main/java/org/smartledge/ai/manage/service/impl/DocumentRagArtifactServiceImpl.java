@@ -17,7 +17,6 @@ import org.smartledge.ai.manage.data.SuperAgentDocumentTableCell;
 import org.smartledge.ai.manage.data.SuperAgentDocumentTableColumn;
 import org.smartledge.ai.manage.data.SuperAgentDocumentTableRow;
 import org.smartledge.ai.manage.data.SuperAgentDocumentTask;
-import org.smartledge.ai.knowledge.augmentation.data.SuperAgentKgCommunity;
 import org.smartledge.ai.knowledge.augmentation.data.SuperAgentKgEntity;
 import org.smartledge.ai.knowledge.augmentation.data.SuperAgentKgEvidence;
 import org.smartledge.ai.knowledge.augmentation.data.SuperAgentKgRelation;
@@ -37,7 +36,6 @@ import org.smartledge.ai.manage.mapper.SuperAgentDocumentTableCellMapper;
 import org.smartledge.ai.manage.mapper.SuperAgentDocumentTableColumnMapper;
 import org.smartledge.ai.manage.mapper.SuperAgentDocumentTableRowMapper;
 import org.smartledge.ai.manage.mapper.SuperAgentDocumentTaskMapper;
-import org.smartledge.ai.knowledge.augmentation.mapper.SuperAgentKgCommunityMapper;
 import org.smartledge.ai.knowledge.augmentation.mapper.SuperAgentKgEntityMapper;
 import org.smartledge.ai.knowledge.augmentation.mapper.SuperAgentKgEvidenceMapper;
 import org.smartledge.ai.knowledge.augmentation.mapper.SuperAgentKgRelationMapper;
@@ -128,8 +126,6 @@ public class DocumentRagArtifactServiceImpl implements DocumentRagArtifactServic
 
     private final SuperAgentKgRelationMapper kgRelationMapper;
 
-    private final SuperAgentKgCommunityMapper kgCommunityMapper;
-
     private final SuperAgentKgEvidenceMapper kgEvidenceMapper;
 
     private final SuperAgentRaptorNodeMapper raptorNodeMapper;
@@ -152,7 +148,6 @@ public class DocumentRagArtifactServiceImpl implements DocumentRagArtifactServic
             case TABLE -> queryTablePage(context, keyword, pageNo, pageSize);
             case CHILD_CHUNK -> queryChunkPage(context, keyword, pageNo, pageSize);
             case KG_ENTITY -> queryEntityPage(context, dto, keyword, pageNo, pageSize);
-            case KG_COMMUNITY -> queryCommunityPage(context, keyword, pageNo, pageSize);
             case KG_EVIDENCE -> queryEvidencePage(context, dto, keyword, pageNo, pageSize);
             case RAPTOR_NODE -> queryRaptorPage(context, dto, keyword, pageNo, pageSize);
         };
@@ -182,7 +177,6 @@ public class DocumentRagArtifactServiceImpl implements DocumentRagArtifactServic
             case TABLE -> tableDetail(context, identity.sourceId());
             case CHILD_CHUNK -> chunkDetail(context, identity.sourceId());
             case KG_ENTITY -> entityDetail(context, identity.sourceId());
-            case KG_COMMUNITY -> communityDetail(context, identity.sourceId());
             case KG_EVIDENCE -> evidenceDetail(context, identity.sourceId());
             case RAPTOR_NODE -> raptorDetail(context, identity.sourceId());
         };
@@ -848,40 +842,6 @@ public class DocumentRagArtifactServiceImpl implements DocumentRagArtifactServic
         return wrapper.orderByAsc(SuperAgentKgEntity::getName, SuperAgentKgEntity::getId);
     }
 
-    private NodePage queryCommunityPage(ArtifactContext context, String keyword, int pageNo, int pageSize) {
-        Page<SuperAgentKgCommunity> page = new Page<>(pageNo, pageSize);
-        IPage<SuperAgentKgCommunity> result = kgCommunityMapper.selectPage(page, communityPageWrapper(context, keyword));
-        return nodePage(result, this::communityNode);
-    }
-
-    private LambdaQueryWrapper<SuperAgentKgCommunity> communityPageWrapper(ArtifactContext context, String keyword) {
-        LambdaQueryWrapper<SuperAgentKgCommunity> wrapper = new LambdaQueryWrapper<SuperAgentKgCommunity>()
-            .select(
-                SuperAgentKgCommunity::getId,
-                SuperAgentKgCommunity::getCommunityNo,
-                SuperAgentKgCommunity::getTitle,
-                SuperAgentKgCommunity::getSummary,
-                SuperAgentKgCommunity::getEntityIdsJson,
-                SuperAgentKgCommunity::getRelationIdsJson,
-                SuperAgentKgCommunity::getEvidenceIdsJson
-            )
-            .eq(SuperAgentKgCommunity::getDocumentId, context.document().getId())
-            .eq(SuperAgentKgCommunity::getTaskId, context.indexTaskId())
-            .eq(SuperAgentKgCommunity::getStatus, BusinessStatus.YES.getCode());
-        Long number = numericKeyword(keyword);
-        if (StrUtil.isNotBlank(keyword)) {
-            wrapper.and(query -> {
-                query.like(SuperAgentKgCommunity::getTitle, keyword)
-                    .or().like(SuperAgentKgCommunity::getSummary, keyword);
-                if (number != null) {
-                    query.or().eq(SuperAgentKgCommunity::getId, number)
-                        .or().eq(SuperAgentKgCommunity::getCommunityNo, number);
-                }
-            });
-        }
-        return wrapper.orderByAsc(SuperAgentKgCommunity::getCommunityNo, SuperAgentKgCommunity::getId);
-    }
-
     private NodePage queryEvidencePage(ArtifactContext context,
                                        DocumentRagArtifactNodePageQueryDto dto,
                                        String keyword,
@@ -1155,23 +1115,6 @@ public class DocumentRagArtifactServiceImpl implements DocumentRagArtifactServic
         ));
     }
 
-    private DocumentRagArtifactNodeDetailVo communityDetail(ArtifactContext context, Long sourceId) {
-        SuperAgentKgCommunity community = kgCommunityMapper.selectOne(
-            communityIdentityWrapper(context, sourceId).last("limit 1")
-        );
-        if (community == null) {
-            throw nodeNotFound();
-        }
-        return detailVo(context, communityNode(community, community.getSummary()), community.getSummary(), attributes(
-            attribute("社区编号", community.getCommunityNo()),
-            attribute("标题", community.getTitle()),
-            attribute("实体数量", readLongList(community.getEntityIdsJson()).size()),
-            attribute("关系数量", readLongList(community.getRelationIdsJson()).size()),
-            attribute("证据数量", readLongList(community.getEvidenceIdsJson()).size()),
-            attribute("元数据", community.getMetadataJson())
-        ));
-    }
-
     private DocumentRagArtifactNodeDetailVo raptorDetail(ArtifactContext context, Long sourceId) {
         SuperAgentRaptorNode node = context.indexTaskId() == null ? null : raptorNodeMapper.selectOne(
             raptorIdentityWrapper(context, sourceId).last("limit 1")
@@ -1344,19 +1287,6 @@ public class DocumentRagArtifactServiceImpl implements DocumentRagArtifactServic
                     )
                     .last("limit 1")
             );
-            case KG_COMMUNITY -> kgCommunityMapper.selectOne(
-                communityIdentityWrapper(context, identity.sourceId())
-                    .select(
-                        SuperAgentKgCommunity::getId,
-                        SuperAgentKgCommunity::getCommunityNo,
-                        SuperAgentKgCommunity::getTitle,
-                        SuperAgentKgCommunity::getSummary,
-                        SuperAgentKgCommunity::getEntityIdsJson,
-                        SuperAgentKgCommunity::getRelationIdsJson,
-                        SuperAgentKgCommunity::getEvidenceIdsJson
-                    )
-                    .last("limit 1")
-            );
             case KG_EVIDENCE -> context.indexTaskId() == null ? null : kgEvidenceMapper.selectOne(
                 evidenceIdentityWrapper(context, identity.sourceId())
                     .select(
@@ -1404,7 +1334,7 @@ public class DocumentRagArtifactServiceImpl implements DocumentRagArtifactServic
             case PARENT_BLOCK -> parentRelationSegments(context, focus, direction);
             case TABLE -> tableRelationSegments(context, focus, direction);
             case CHILD_CHUNK -> chunkRelationSegments(context, focus, direction);
-            case KG_ENTITY, KG_COMMUNITY -> List.of();
+            case KG_ENTITY -> List.of();
             case KG_EVIDENCE -> evidenceRelationSegments(context, focus, direction);
             case RAPTOR_NODE -> raptorRelationSegments(context, focus, direction);
         };
@@ -2282,14 +2212,6 @@ public class DocumentRagArtifactServiceImpl implements DocumentRagArtifactServic
             .eq(SuperAgentKgEntity::getStatus, BusinessStatus.YES.getCode());
     }
 
-    private LambdaQueryWrapper<SuperAgentKgCommunity> communityIdentityWrapper(ArtifactContext context, Long sourceId) {
-        return new LambdaQueryWrapper<SuperAgentKgCommunity>()
-            .eq(SuperAgentKgCommunity::getId, sourceId)
-            .eq(SuperAgentKgCommunity::getDocumentId, context.document().getId())
-            .eq(SuperAgentKgCommunity::getTaskId, context.indexTaskId())
-            .eq(SuperAgentKgCommunity::getStatus, BusinessStatus.YES.getCode());
-    }
-
     private LambdaQueryWrapper<SuperAgentRaptorNode> raptorIdentityWrapper(ArtifactContext context, Long sourceId) {
         return new LambdaQueryWrapper<SuperAgentRaptorNode>()
             .eq(SuperAgentRaptorNode::getId, sourceId)
@@ -2307,7 +2229,6 @@ public class DocumentRagArtifactServiceImpl implements DocumentRagArtifactServic
             case TABLE -> tableNode((SuperAgentDocumentTable) source);
             case CHILD_CHUNK -> chunkNode((SuperAgentDocumentChunk) source);
             case KG_ENTITY -> entityNode((SuperAgentKgEntity) source);
-            case KG_COMMUNITY -> communityNode((SuperAgentKgCommunity) source);
             case KG_EVIDENCE -> evidenceNode((SuperAgentKgEvidence) source);
             case RAPTOR_NODE -> raptorNode((SuperAgentRaptorNode) source);
         };
@@ -2445,29 +2366,6 @@ public class DocumentRagArtifactServiceImpl implements DocumentRagArtifactServic
             null,
             firstNotBlank(entity.getName(), entity.getNormalizedName(), "实体 #" + valueOrDash(entity.getId())),
             StrUtil.blankToDefault(entity.getEntityType(), "未分类实体"),
-            "",
-            "",
-            null,
-            "",
-            preview(content),
-            "neutral"
-        );
-    }
-
-    private DocumentRagSnapshotVo.ArtifactGraphNodeItem communityNode(SuperAgentKgCommunity community) {
-        return communityNode(community, community.getSummary());
-    }
-
-    private DocumentRagSnapshotVo.ArtifactGraphNodeItem communityNode(SuperAgentKgCommunity community,
-                                                                        String content) {
-        String subtitle = readLongList(community.getEntityIdsJson()).size() + " 个实体 · "
-            + readLongList(community.getRelationIdsJson()).size() + " 条关系";
-        return node(
-            DocumentRagArtifactType.KG_COMMUNITY,
-            community.getId(),
-            community.getCommunityNo(),
-            firstNotBlank(community.getTitle(), "社区 #" + valueOrDash(community.getCommunityNo())),
-            subtitle,
             "",
             "",
             null,

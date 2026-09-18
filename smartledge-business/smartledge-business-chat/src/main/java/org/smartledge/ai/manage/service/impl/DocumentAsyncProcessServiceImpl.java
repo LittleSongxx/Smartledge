@@ -51,7 +51,6 @@ import org.smartledge.ai.manage.service.DocumentParserService;
 import org.smartledge.ai.manage.service.DocumentProfileService;
 import org.smartledge.ai.manage.service.DocumentStorageService;
 import org.smartledge.ai.manage.service.DocumentStrategyService;
-import org.smartledge.ai.manage.service.DocumentStructureGraphProjectionService;
 import org.smartledge.ai.manage.service.DocumentStructureNodeService;
 import org.smartledge.ai.manage.service.DocumentTaskLogService;
 import org.smartledge.ai.manage.service.DocumentVectorGateway;
@@ -152,8 +151,6 @@ public class DocumentAsyncProcessServiceImpl implements DocumentAsyncProcessServ
     private final ObjectProvider<DocumentKeywordSearchGateway> keywordSearchGatewayProvider;
 
     private final ObjectProvider<DocumentNavigationIndexService> navigationIndexServiceProvider;
-
-    private final ObjectProvider<DocumentStructureGraphProjectionService> graphProjectionServiceProvider;
 
     private final DocumentProfileService documentProfileService;
 
@@ -866,10 +863,10 @@ public class DocumentAsyncProcessServiceImpl implements DocumentAsyncProcessServ
                         () -> graphRagBuildService.rebuildDocumentGraph(documentId, taskId, chunkEntityList));
                 long graphRagCostMillis = elapsedMillis(graphRagStartedNanos);
                 log.info(
-                        "GraphRAG 构建阶段完成，documentId={}, taskId={}, entityCount={}, relationCount={}, evidenceCount={}, communityCount={}, costMillis={}",
+                        "GraphRAG 构建阶段完成，documentId={}, taskId={}, entityCount={}, relationCount={}, evidenceCount={}, costMillis={}",
                         documentId, taskId, graphRagBuildResult.getEntityCount(),
                         graphRagBuildResult.getRelationCount(), graphRagBuildResult.getEvidenceCount(),
-                        graphRagBuildResult.getCommunityCount(), graphRagCostMillis);
+                        graphRagCostMillis);
 
                 saveIndexBuildLog(taskId, documentId, DocumentTaskStageEnum.GRAPH_RAG.getCode(),
                         DocumentTaskEventTypeEnum.COMPLETE.getCode(), DocumentLogLevelEnum.INFO.getCode(),
@@ -877,8 +874,7 @@ public class DocumentAsyncProcessServiceImpl implements DocumentAsyncProcessServ
                         "GraphRAG 实体关系图谱构建完成，耗时 " + graphRagCostMillis + "ms。",
                         detail("entityCount", graphRagBuildResult.getEntityCount(), "relationCount",
                                 graphRagBuildResult.getRelationCount(), "evidenceCount",
-                                graphRagBuildResult.getEvidenceCount(), "communityCount",
-                                graphRagBuildResult.getCommunityCount(), "costMillis", graphRagCostMillis));
+                                graphRagBuildResult.getEvidenceCount(), "costMillis", graphRagCostMillis));
             }
 
             GraphRagFinalization graphFinalization = finalizeGraphRagOutcome(document, documentId, taskId, planId, task,
@@ -1170,7 +1166,6 @@ public class DocumentAsyncProcessServiceImpl implements DocumentAsyncProcessServ
             return GraphRagBuildResult.builder().entityCount(integerValue(state.get("entityCount")))
                     .relationCount(integerValue(state.get("relationCount")))
                     .evidenceCount(integerValue(state.get("evidenceCount")))
-                    .communityCount(integerValue(state.get("communityCount")))
                     .graphPersistenceOutcome(persistenceOutcome)
                     .graphPersistenceReason(stringValue(state.get("graphPersistenceReason"))).kgCommitted(kgCommitted)
                     .typedIndexOutcome(
@@ -1691,18 +1686,6 @@ public class DocumentAsyncProcessServiceImpl implements DocumentAsyncProcessServ
         }
         else {
             log.info("跳过导航 ES 索引同步，因为服务未启用: documentId={}, parseTaskId={}", documentId, parseTaskId);
-        }
-        DocumentStructureGraphProjectionService graphProjectionService = graphProjectionServiceProvider
-                .getIfAvailable();
-        if (graphProjectionService != null && graphProjectionService.enabled()) {
-            long graphProjectionStartedNanos = System.nanoTime();
-            log.info("同步结构图投影: documentId={}, parseTaskId={}", documentId, parseTaskId);
-            graphProjectionService.projectToGraph(documentId, parseTaskId);
-            log.info("同步结构图投影完成: documentId={}, parseTaskId={}, costMillis={}", documentId, parseTaskId,
-                    elapsedMillis(graphProjectionStartedNanos));
-        }
-        else {
-            log.info("跳过结构图投影，因为图服务未启用: documentId={}, parseTaskId={}", documentId, parseTaskId);
         }
         log.info("导航产物同步流程完成: documentId={}, parseTaskId={}, costMillis={}", documentId, parseTaskId,
                 elapsedMillis(startedNanos));

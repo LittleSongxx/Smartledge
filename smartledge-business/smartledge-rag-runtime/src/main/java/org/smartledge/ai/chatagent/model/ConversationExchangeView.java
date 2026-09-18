@@ -37,4 +37,7 @@ public class ConversationExchangeView {
     private String retrievalConfigSnapshotJson;
     private Date createTime;
     private Date editTime;
+    /** 用户反馈评分 "UP"/"DOWN"；无反馈为 null。由业务层在视图装配后补充。 */
+    private String feedbackRating;
+    private String feedbackComment;
 }

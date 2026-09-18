@@ -77,6 +77,13 @@ public class TaskInfo {
     private final AtomicLong firstResponseTimeMs = new AtomicLong(0L);
     private final AtomicBoolean finalized = new AtomicBoolean(false);
 
+    /**
+     * 部分答案落库的节流状态：上次 flush 的时钟毫秒与已 flush 的缓冲区长度。
+     * 只服务崩溃安全兜底，不参与终态收口；volatile 因为流式回调跨线程。
+     */
+    private volatile long lastPartialFlushAtMillis = 0L;
+    private volatile int lastPartialFlushLength = 0;
+
     private final AtomicBoolean agentCancelled = new AtomicBoolean(false);
     private final reactor.core.Disposable.Swap agentSubscription = reactor.core.Disposables.swap();
     public AtomicBoolean agentCancelled() { return agentCancelled; }

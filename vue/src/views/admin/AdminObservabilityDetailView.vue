@@ -137,6 +137,12 @@
                     <div class="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
                       <strong class="text-title-sm font-semibold" :class="signalStatusTextClass(answerSignalMap.answer.statusCode)">{{ answerSignalMap.answer.status }}</strong>
                       <span class="text-caption tabular-nums text-muted-foreground">首包 {{ answerSignalMap.answer.latency }}</span>
+                      <span
+                        v-if="activeExchange && activeExchange.feedbackRating"
+                        class="inline-flex items-center rounded-md px-2 py-0.5 text-caption font-semibold"
+                        :class="activeExchange.feedbackRating === 'UP' ? 'bg-emerald-500/10 text-emerald-600' : 'bg-rose-500/10 text-rose-600'">
+                        用户反馈 {{ activeExchange.feedbackRating === 'UP' ? '有帮助' : '没帮助' }}
+                      </span>
                     </div>
                     <blockquote class="m-0 mt-3 max-w-prose border-l border-border-strong pl-3 text-compact leading-relaxed text-foreground">
                       {{ answerSignalMap.answer.preview }}

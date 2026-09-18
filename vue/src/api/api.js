@@ -435,6 +435,19 @@ export const chatApi = {
     })
   },
 
+  submitExchangeFeedback({ conversationId, exchangeId, rating, comment }) {
+    // 轮次点赞/点踩：DOWN 反馈是质量评测金标候选的线上来源。
+    return requestApiEnvelope('/api/chat/exchange/feedback', {
+      method: 'POST',
+      body: {
+        conversationId,
+        exchangeId,
+        rating,
+        comment: comment || null
+      }
+    })
+  },
+
   deleteSession(conversationId) {
     // 页面按钮文案仍然叫“删除会话”，
     // 但后端实际执行的是 reset：会收口运行中任务、清理业务记录和 Graph checkpoint。

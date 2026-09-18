@@ -124,8 +124,29 @@ public class MybatisConversationArchiveStore implements ConversationArchiveStore
             selectionNames(knowledgeBaseSelection),
             writeNullableJson(knowledgeBaseSelection == null ? null : knowledgeBaseSelection.getRagRuntimeOptions()),
             DateUtils.now(),
-            DateUtils.now()
+            DateUtils.now(),
+            null,
+            null
         );
+    }
+
+    @Override
+    public boolean flushPartialAnswer(String conversationId, long exchangeId, String answer) {
+        if (conversationId == null || conversationId.isBlank() || answer == null || answer.isEmpty()) {
+            return false;
+        }
+
+        // 只覆盖仍处于 RUNNING 的轮次：终态写入永远晚于、强于这次兜底落库。
+        int updated = exchangeMapper.update(
+            null,
+            new LambdaUpdateWrapper<SuperAgentChatExchange>()
+                .eq(SuperAgentChatExchange::getId, exchangeId)
+                .eq(SuperAgentChatExchange::getConversationId, conversationId)
+                .eq(SuperAgentChatExchange::getTurnStatus, ChatTurnStatus.RUNNING.getCode())
+                .set(SuperAgentChatExchange::getAnswer, answer)
+                .set(SuperAgentChatExchange::getEditTime, new Date())
+        );
+        return updated > 0;
     }
 
     @Override
@@ -618,7 +639,9 @@ public class MybatisConversationArchiveStore implements ConversationArchiveStore
             readStringList(exchange.getSelectedKnowledgeBaseNamesJson()),
             safeText(exchange.getRetrievalConfigSnapshotJson()),
             exchange.getCreateTime(),
-            exchange.getEditTime()
+            exchange.getEditTime(),
+            null,
+            null
         );
     }
 

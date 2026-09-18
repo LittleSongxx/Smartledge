@@ -11,7 +11,6 @@ public enum DocumentRagArtifactType {
     TABLE("TABLE", "表格", "table-"),
     CHILD_CHUNK("CHILD_CHUNK", "检索子块", "chunk-"),
     KG_ENTITY("KG_ENTITY", "图谱实体", "kg-entity-"),
-    KG_COMMUNITY("KG_COMMUNITY", "图谱社区", "kg-community-"),
     KG_EVIDENCE("KG_EVIDENCE", "图谱证据", "kg-evidence-"),
     RAPTOR_NODE("RAPTOR_NODE", "层级摘要", "raptor-");
 

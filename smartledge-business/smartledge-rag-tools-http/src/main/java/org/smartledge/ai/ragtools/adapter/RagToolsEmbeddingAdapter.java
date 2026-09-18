@@ -54,6 +54,11 @@ public class RagToolsEmbeddingAdapter implements EmbeddingPort {
         return modelLabel;
     }
 
+    @Override
+    public int dimensions() {
+        return expectedDimensions;
+    }
+
     private List<float[]> validate(RagToolsEmbedResponse response, int expectedCount) {
         if (response == null) {
             throw new IllegalStateException("Python 向量化接口返回为空。");

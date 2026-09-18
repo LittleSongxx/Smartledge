@@ -14,7 +14,6 @@ public final class PromptTemplateNames {
     public static final String CONVERSATION_SUMMARY_MERGE = "conversation-summary-merge";
     public static final String CONVERSATION_SUMMARY_SYSTEM = "conversation-summary-system";
     public static final String DOCUMENT_CHUNK_KEYWORD_QUESTION = "document-chunk-keyword-question";
-    public static final String DOCUMENT_GRAPH_RAG_COMMUNITY_REPORT = "document-graph-rag-community-report";
     public static final String DOCUMENT_GRAPH_RAG_ENTITY_RESOLUTION = "document-graph-rag-entity-resolution";
     public static final String DOCUMENT_GRAPH_RAG_QUERY_PLAN = "document-graph-rag-query-plan";
     public static final String DOCUMENT_QUERY_UNDERSTANDING = "document-query-understanding";

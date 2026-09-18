@@ -114,4 +114,39 @@ describe('Chat answer rendering', () => {
     await retryButton.trigger('click')
     expect(wrapper.emitted('retry')).toEqual([['重试这个问题']])
   })
+
+  it('shows feedback buttons only on terminal exchanges and emits the rating', async () => {
+    const message = {
+      id: 'exchange-100-assistant',
+      role: 'assistant',
+      exchangeId: 100,
+      question: 'GPIO 管脚',
+      content: 'P21 默认下拉 [1]。',
+      references: [],
+      recommendations: [],
+      status: 'COMPLETED',
+      feedbackRating: null
+    }
+    const wrapper = mountChat(message)
+
+    const downButton = wrapper.findAll('button').find((button) => button.text().includes('没帮助'))
+    expect(downButton).toBeTruthy()
+    await downButton.trigger('click')
+    expect(wrapper.emitted('feedback')).toEqual([['DOWN']])
+  })
+
+  it('hides feedback buttons while the exchange is still running', () => {
+    const wrapper = mountChat({
+      id: 'exchange-101-assistant',
+      role: 'assistant',
+      exchangeId: 101,
+      content: '生成中',
+      references: [],
+      recommendations: [],
+      status: 'RUNNING',
+      feedbackRating: null
+    })
+
+    expect(wrapper.text()).not.toContain('有帮助')
+  })
 })

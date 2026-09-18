@@ -38,15 +38,11 @@ public class GraphRagQualityReport {
 
     private Long evidenceCount;
 
-    private Long communityCount;
-
     private Long groundedEntityCount;
 
     private Long groundedRelationCount;
 
     private Long traceableEvidenceCount;
-
-    private Long communityWithEvidenceCount;
 
     private Long rankedGraphItemCount;
 
@@ -54,15 +50,11 @@ public class GraphRagQualityReport {
 
     private Long entityResolutionEnhancedCount;
 
-    private Long communityReportEnhancedCount;
-
     private Double entityEvidenceCoverage;
 
     private Double relationEvidenceCoverage;
 
     private Double evidenceTraceabilityCoverage;
-
-    private Double communityEvidenceCoverage;
 
     private Double rankCoverage;
 
@@ -79,19 +71,15 @@ public class GraphRagQualityReport {
             .entityCount(0L)
             .relationCount(0L)
             .evidenceCount(0L)
-            .communityCount(0L)
             .groundedEntityCount(0L)
             .groundedRelationCount(0L)
             .traceableEvidenceCount(0L)
-            .communityWithEvidenceCount(0L)
             .rankedGraphItemCount(0L)
             .controlledExtractionItemCount(0L)
             .entityResolutionEnhancedCount(0L)
-            .communityReportEnhancedCount(0L)
             .entityEvidenceCoverage(0D)
             .relationEvidenceCoverage(0D)
             .evidenceTraceabilityCoverage(0D)
-            .communityEvidenceCoverage(0D)
             .rankCoverage(0D)
             .signals(List.of())
             .build();

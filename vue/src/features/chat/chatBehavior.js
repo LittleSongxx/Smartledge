@@ -19,6 +19,15 @@ export function shouldApplyStreamEvent(activeToken, eventToken) {
   return activeToken != null && eventToken != null && activeToken === eventToken
 }
 
+/**
+ * 会话里是否还有 RUNNING 轮次：决定前端是否需要用 session/detail 轮询追进度。
+ * 本地流式中不需要（SSE 是实时的）；刷新页面、第二窗口或流意外断开后靠它恢复视图。
+ */
+export function hasRunningExchange(exchanges) {
+  if (!Array.isArray(exchanges)) return false
+  return exchanges.some((exchange) => asText(exchange?.status) === 'RUNNING')
+}
+
 export function mergeAssistantStreamEvent(message, event) {
   const next = {
     ...message,

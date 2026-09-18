@@ -318,8 +318,7 @@ describe('RagArtifactExplorer on-demand boundaries', () => {
       typeStats: [
         { nodeType: 'DOCUMENT', totalCount: 1 },
         { nodeType: 'KG_ENTITY', totalCount: 2 },
-        { nodeType: 'KG_EVIDENCE', totalCount: 1 },
-        { nodeType: 'KG_COMMUNITY', totalCount: 1 }
+        { nodeType: 'KG_EVIDENCE', totalCount: 1 }
       ]
     }
     mocks.queryNodes.mockImplementation(({ nodeType, entityId }) => {
@@ -328,9 +327,6 @@ describe('RagArtifactExplorer on-demand boundaries', () => {
       }
       if (nodeType === 'KG_EVIDENCE' && entityId === '81') {
         return Promise.resolve({ pageNo: 1, pageSize: 5, total: 1, records: [{ nodeId: 'kg-evidence-91', nodeType, label: 'Evidence #91' }] })
-      }
-      if (nodeType === 'KG_COMMUNITY') {
-        return Promise.resolve({ pageNo: 1, pageSize: 5, total: 1, records: [{ nodeId: 'kg-community-7', nodeType, label: '交易社区' }] })
       }
       return Promise.resolve({ pageNo: 1, pageSize: 10, total: 0, records: [] })
     })
@@ -359,7 +355,6 @@ describe('RagArtifactExplorer on-demand boundaries', () => {
     expect(mocks.queryRelations).toHaveBeenCalledWith(expect.objectContaining({ nodeId: 'kg-entity-81', direction: 'OUTGOING', pageSize: 5 }))
     expect(mocks.queryNodes).toHaveBeenCalledWith(expect.objectContaining({ nodeType: 'KG_EVIDENCE', entityId: '81', pageSize: 5 }))
     expect(wrapper.text()).toContain('Evidence #91')
-    expect(wrapper.text()).toContain('交易社区')
 
     await wrapper.get('button[aria-label="切换到图谱全景"]').trigger('click')
     await flushPromises()

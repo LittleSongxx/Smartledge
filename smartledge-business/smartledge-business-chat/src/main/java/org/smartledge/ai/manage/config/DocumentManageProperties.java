@@ -47,8 +47,6 @@ public class DocumentManageProperties {
 
     private Elasticsearch elasticsearch = new Elasticsearch();
 
-    private Neo4j neo4j = new Neo4j();
-
     @Data
     public static class Minio {
         private String endpoint = "http://127.0.0.1:9000";
@@ -175,30 +173,5 @@ public class DocumentManageProperties {
         private Integer connectTimeoutMillis = 3000;
 
         private Integer socketTimeoutMillis = 5000;
-    }
-
-    @Data
-    public static class Neo4j {
-
-        private Boolean enabled = Boolean.FALSE;
-
-        private String uri = "bolt://127.0.0.1:7687";
-
-        private String username = "neo4j";
-
-        private String password = "12345678";
-
-        private String database = "neo4j";
-
-        /**
-         * 单条 Cypher 语句的事务超时时间，单位：秒。
-         *
-         * <p>此前该值被错误地绑定到驱动连接超时，导致 Cypher 语句实际上没有超时上限，
-         * 一条慢查询会一直占住检索线程。</p>
-         */
-        private Integer queryTimeoutSeconds = 5;
-
-        /** 建立 Neo4j 连接的超时时间，单位：秒。 */
-        private Integer connectionTimeoutSeconds = 10;
     }
 }

@@ -193,7 +193,6 @@ test('parse workbench tabs render only their assigned RAG learning content', asy
   await expect(ragSection.getByText('指向当前实体', { exact: false }).first()).toBeVisible()
   await expect(ragSection.getByText('当前实体指向', { exact: false }).first()).toBeVisible()
   await expect(ragSection.getByText('课程证据片段', { exact: true })).toBeVisible()
-  await expect(ragSection.getByText('检索技术社区', { exact: true })).toBeVisible()
   await expect(ragSection.locator('.artifact-flow-line')).toHaveCount(2)
   const prefersReducedMotion = await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)
   expect(prefersReducedMotion).toBe(testInfo.project.name === 'chrome-reduce')
@@ -466,7 +465,6 @@ function artifactNodes(payload) {
   if (payload.nodeType === 'PARSE_BLOCK') return [parseBlockNode]
   if (payload.nodeType === 'KG_ENTITY') return [graphEntity]
   if (payload.nodeType === 'KG_EVIDENCE') return [graphEvidence]
-  if (payload.nodeType === 'KG_COMMUNITY') return [graphCommunity]
   if (payload.nodeType === 'RAPTOR_NODE' && payload.rootOnly) return [raptorRoot]
   if (payload.nodeType === 'RAPTOR_NODE' && payload.parentNodeId === '301') return [raptorChild, raptorChildStrategy, raptorChildEvidence]
   if (payload.nodeType === 'TABLE') return [tableNode]
@@ -488,7 +486,6 @@ const graphEntity = { nodeId: 'kg-entity-201', nodeType: 'KG_ENTITY', sourceId: 
 const graphNeighbor = { nodeId: 'kg-entity-202', nodeType: 'KG_ENTITY', sourceId: '202', label: '课程资料', subtitle: 'DOCUMENT' }
 const graphTarget = { nodeId: 'kg-entity-203', nodeType: 'KG_ENTITY', sourceId: '203', label: '关系检索', subtitle: 'METHOD' }
 const graphEvidence = { nodeId: 'kg-evidence-211', nodeType: 'KG_EVIDENCE', sourceId: '211', label: '课程证据片段', subtitle: '第 1 页', textPreview: '关系检索基于实体与边。' }
-const graphCommunity = { nodeId: 'kg-community-221', nodeType: 'KG_COMMUNITY', sourceId: '221', label: '检索技术社区', textPreview: '聚合图谱检索与层级摘要相关实体。' }
 const raptorRoot = { nodeId: 'raptor-301', nodeType: 'RAPTOR_NODE', sourceId: '301', label: '全篇摘要', subtitle: '第 2 层', textPreview: '文档全篇摘要。', childCount: 3 }
 const raptorChild = { nodeId: 'raptor-302', nodeType: 'RAPTOR_NODE', sourceId: '302', label: '关系检索章节摘要', subtitle: '第 1 层', textPreview: '章节摘要。', childCount: 0 }
 const raptorChildStrategy = { nodeId: 'raptor-303', nodeType: 'RAPTOR_NODE', sourceId: '303', label: '分块策略章节摘要', subtitle: '第 1 层', textPreview: '父块与检索子块策略摘要。', childCount: 0 }
@@ -504,7 +501,6 @@ const allNodes = [
   graphNeighbor,
   graphTarget,
   graphEvidence,
-  graphCommunity,
   raptorRoot,
   raptorChild,
   raptorChildStrategy,
@@ -530,7 +526,6 @@ const ragSnapshot = {
       { nodeType: 'CHILD_CHUNK', totalCount: 1 },
       { nodeType: 'KG_ENTITY', totalCount: 3 },
       { nodeType: 'KG_EVIDENCE', totalCount: 1 },
-      { nodeType: 'KG_COMMUNITY', totalCount: 1 },
       { nodeType: 'RAPTOR_NODE', totalCount: 4 },
       { nodeType: 'TABLE', totalCount: 1 }
     ]

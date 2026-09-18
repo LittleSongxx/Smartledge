@@ -64,6 +64,7 @@ public final class ModelHttpClient implements AutoCloseable {
     private final EmbeddingPort embedding = new EmbeddingPort() {
         @Override public List<float[]> embed(List<String> texts) { return callEmbedding(texts); }
         @Override public String model() { return settings.embedding().model(); }
+        @Override public int dimensions() { return settings.embeddingDimensions(); }
     };
 
     public ModelHttpClient(ModelHttpSettings settings, ObjectMapper mapper) {

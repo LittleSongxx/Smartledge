@@ -317,8 +317,8 @@
               @outgoing-page="(page) => loadRelationPage('OUTGOING', page)"
             />
 
-            <div class="grid border-t border-border lg:grid-cols-2">
-              <section class="min-w-0 border-b border-border p-4 lg:border-b-0 lg:border-r">
+            <div class="border-t border-border">
+              <section class="min-w-0 p-4">
                 <div class="mb-3 flex items-center justify-between gap-2">
                   <div>
                     <strong class="block text-xs text-foreground">原文证据</strong>
@@ -345,7 +345,7 @@
                         <strong class="truncate text-xs text-foreground">{{ item.label }}</strong>
                         <MapPinIcon v-if="item.overlayId" class="size-3.5 shrink-0 text-muted-foreground group-hover:text-primary" />
                       </span>
-                      <span class="mt-1 block truncate text-micro font-normal text-muted-foreground">{{ item.sectionPath || item.pageRange || item.subtitle || '-' }}</span>
+                      <span class="mt-1 block truncate text-micro font-normal leading-4 text-muted-foreground">{{ item.sectionPath || item.pageRange || item.subtitle || '-' }}</span>
                     </span>
                   </Button>
                 </div>
@@ -356,44 +356,6 @@
                   :page-count="evidencePageCount"
                   :loading="evidenceLoading"
                   @change="(page) => loadEvidence(selectedNode?.sourceId, page)"
-                />
-              </section>
-
-              <section class="min-w-0 p-4">
-                <div class="mb-3 flex items-center justify-between gap-2">
-                  <div>
-                    <strong class="block text-xs text-foreground">Community reports</strong>
-                    <span class="text-micro text-muted-foreground">社区摘要独立于实体关系画布</span>
-                  </div>
-                  <span class="text-technical text-muted-foreground">{{ formatCount(communityPage.total) }}</span>
-                </div>
-                <p v-if="communityLoading" class="py-6 text-center text-xs text-muted-foreground">正在读取社区...</p>
-                <div v-else-if="communityError" class="py-6 text-center">
-                  <p class="text-xs text-destructive">{{ communityError }}</p>
-                  <Button variant="outline" size="sm" class="mt-3 rounded-md" type="button" @click="loadCommunities(communityPage.pageNo)">重新加载</Button>
-                </div>
-                <div v-else-if="communityRecords.length" class="overflow-hidden rounded-md border border-border bg-card">
-                  <Button
-                    v-for="item in communityRecords"
-                    :key="item.nodeId"
-                    variant="ghost"
-                    class="h-auto w-full justify-start rounded-none border-b border-border p-3 text-left whitespace-normal last:border-b-0 hover:bg-primary/[0.03]"
-                    type="button"
-                    @click="openNodeDetail(item)"
-                  >
-                    <span class="min-w-0 flex-1">
-                      <strong class="block truncate text-xs text-foreground">{{ item.label }}</strong>
-                      <span class="mt-1 line-clamp-2 text-micro font-normal leading-4 text-muted-foreground">{{ item.textPreview || item.subtitle || '暂无社区摘要' }}</span>
-                    </span>
-                  </Button>
-                </div>
-                <p v-else class="py-6 text-center text-xs text-muted-foreground">当前任务没有社区摘要。</p>
-                <PageControls
-                  v-if="!communityLoading && !communityError && communityPage.total > communityPage.pageSize"
-                  :page-no="communityPage.pageNo"
-                  :page-count="communityPageCount"
-                  :loading="communityLoading"
-                  @change="loadCommunities"
                 />
               </section>
             </div>
@@ -608,7 +570,6 @@ const typeDefinitions = [
   { type: 'CHILD_CHUNK', label: 'ChildChunk', dot: 'bg-violet-600' },
   { type: 'TABLE', label: '表格', dot: 'bg-amber-700' },
   { type: 'KG_ENTITY', label: '图谱实体', dot: 'bg-rose-700' },
-  { type: 'KG_COMMUNITY', label: '图谱社区', dot: 'bg-fuchsia-700' },
   { type: 'KG_EVIDENCE', label: '图谱证据', dot: 'bg-orange-700' },
   { type: 'RAPTOR_NODE', label: '层级摘要', dot: 'bg-sky-700' }
 ]
@@ -704,9 +665,6 @@ const outgoingError = ref('')
 const evidencePage = ref(emptyNodePage())
 const evidenceLoading = ref(false)
 const evidenceError = ref('')
-const communityPage = ref(emptyNodePage())
-const communityLoading = ref(false)
-const communityError = ref('')
 const raptorRootPage = ref(emptyNodePage())
 const raptorLoading = ref(false)
 const raptorAppendLoading = ref(false)
@@ -732,7 +690,6 @@ let incomingRelationRequestToken = 0
 let outgoingRelationRequestToken = 0
 let detailRequestToken = 0
 let evidenceRequestToken = 0
-let communityRequestToken = 0
 let treeRequestToken = 0
 let treeChildGeneration = 0
 let treeChildRequestId = 0
@@ -755,9 +712,7 @@ const nodePageCount = computed(() => Math.max(1, Math.ceil(Number(nodePage.value
 const incomingRecords = computed(() => Array.isArray(incomingPage.value?.records) ? incomingPage.value.records : [])
 const outgoingRecords = computed(() => Array.isArray(outgoingPage.value?.records) ? outgoingPage.value.records : [])
 const evidenceRecords = computed(() => Array.isArray(evidencePage.value?.records) ? evidencePage.value.records : [])
-const communityRecords = computed(() => Array.isArray(communityPage.value?.records) ? communityPage.value.records : [])
 const evidencePageCount = computed(() => Math.max(1, Math.ceil(Number(evidencePage.value?.total || 0) / Number(evidencePage.value?.pageSize || 5))))
-const communityPageCount = computed(() => Math.max(1, Math.ceil(Number(communityPage.value?.total || 0) / Number(communityPage.value?.pageSize || 5))))
 const dialogDetailAttributes = computed(() => Array.isArray(dialogDetail.value?.attributes) ? dialogDetail.value.attributes : [])
 const isRaptorDetail = computed(() => dialogDetail.value?.presentation?.kind === 'RAPTOR')
 const detailDialogDescription = computed(() => {
@@ -824,7 +779,6 @@ function invalidateRequests() {
   outgoingRelationRequestToken += 1
   detailRequestToken += 1
   evidenceRequestToken += 1
-  communityRequestToken += 1
   treeRequestToken += 1
   treeChildGeneration += 1
   treeChildRequestTokens.clear()
@@ -868,9 +822,6 @@ function resetExplorer() {
   evidencePage.value = emptyNodePage()
   evidenceLoading.value = false
   evidenceError.value = ''
-  communityPage.value = emptyNodePage()
-  communityLoading.value = false
-  communityError.value = ''
   raptorRootPage.value = emptyNodePage()
   raptorLoading.value = false
   raptorAppendLoading.value = false
@@ -945,7 +896,6 @@ function setGraphViewMode(mode) {
 
 function initializeGraphFocus() {
   loadNodePage(1, true)
-  if (!communityPage.value.records.length) loadCommunities(1)
 }
 
 function preferredGraphViewMode() {
@@ -1102,23 +1052,6 @@ async function loadEvidence(entityId, pageNo = 1) {
     if (token === evidenceRequestToken) evidenceError.value = error?.message || '图谱证据读取失败。'
   } finally {
     if (token === evidenceRequestToken) evidenceLoading.value = false
-  }
-}
-
-async function loadCommunities(pageNo = 1) {
-  const token = ++communityRequestToken
-  communityLoading.value = true
-  communityError.value = ''
-  try {
-    const result = await manageApi.queryDocumentRagArtifactNodes({
-      ...taskPayload(), nodeType: 'KG_COMMUNITY', pageNo, pageSize: 5
-    })
-    if (token !== communityRequestToken || activeMode.value !== 'graph') return
-    communityPage.value = result || emptyNodePage(pageNo)
-  } catch (error) {
-    if (token === communityRequestToken) communityError.value = error?.message || '图谱社区读取失败。'
-  } finally {
-    if (token === communityRequestToken) communityLoading.value = false
   }
 }
 
@@ -1382,7 +1315,7 @@ function hasDisplayValue(value) {
 
 function modeCount(mode) {
   if (mode === 'structure') return structureTypes.reduce((sum, item) => sum + Number(nodeCountByType.value[item.type] || 0), 0)
-  if (mode === 'graph') return ['KG_ENTITY', 'KG_COMMUNITY', 'KG_EVIDENCE'].reduce((sum, type) => sum + Number(nodeCountByType.value[type] || 0), 0)
+  if (mode === 'graph') return ['KG_ENTITY', 'KG_EVIDENCE'].reduce((sum, type) => sum + Number(nodeCountByType.value[type] || 0), 0)
   if (mode === 'raptor') return nodeCountByType.value.RAPTOR_NODE || 0
   if (mode === 'table') return nodeCountByType.value.TABLE || 0
   return props.rawArtifacts.length

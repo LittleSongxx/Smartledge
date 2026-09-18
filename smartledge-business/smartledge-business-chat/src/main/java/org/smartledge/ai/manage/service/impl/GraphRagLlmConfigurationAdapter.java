@@ -42,15 +42,6 @@ public class GraphRagLlmConfigurationAdapter implements GraphRagLlmConfiguration
     }
 
     @Override
-    public boolean communityReportEnabled() {
-        SystemConfigSnapshot snapshot = requireSnapshot();
-        if (snapshot.getGraphRagCommunityReport() == null) {
-            throw new IllegalStateException("系统配置缺少 GraphRAG community-report 配置");
-        }
-        return snapshot.getGraphRagCommunityReport().isEnabled();
-    }
-
-    @Override
     public boolean entityResolutionEnabled() {
         SystemConfigSnapshot snapshot = requireSnapshot();
         if (snapshot.getGraphRagEntityResolution() == null) {

@@ -18,7 +18,6 @@ import org.smartledge.ai.manage.data.SuperAgentDocumentTableColumn;
 import org.smartledge.ai.manage.data.SuperAgentDocumentTableRow;
 import org.smartledge.ai.manage.data.SuperAgentDocumentTask;
 import org.smartledge.ai.manage.data.SuperAgentDocumentTaskLog;
-import org.smartledge.ai.knowledge.augmentation.data.SuperAgentKgCommunity;
 import org.smartledge.ai.knowledge.augmentation.data.SuperAgentKgEntity;
 import org.smartledge.ai.knowledge.augmentation.data.SuperAgentKgEvidence;
 import org.smartledge.ai.knowledge.augmentation.data.SuperAgentKgRelation;
@@ -36,7 +35,6 @@ import org.smartledge.ai.manage.mapper.SuperAgentDocumentTableMapper;
 import org.smartledge.ai.manage.mapper.SuperAgentDocumentTableRowMapper;
 import org.smartledge.ai.manage.mapper.SuperAgentDocumentTaskLogMapper;
 import org.smartledge.ai.manage.mapper.SuperAgentDocumentTaskMapper;
-import org.smartledge.ai.knowledge.augmentation.mapper.SuperAgentKgCommunityMapper;
 import org.smartledge.ai.knowledge.augmentation.mapper.SuperAgentKgEntityMapper;
 import org.smartledge.ai.knowledge.augmentation.mapper.SuperAgentKgEvidenceMapper;
 import org.smartledge.ai.knowledge.augmentation.mapper.SuperAgentKgRelationMapper;
@@ -110,8 +108,6 @@ public class DocumentRagSnapshotServiceImpl implements DocumentRagSnapshotServic
 
     private static final int KG_RELATION_SAMPLE_SIZE = 12;
 
-    private static final int KG_COMMUNITY_SAMPLE_SIZE = 8;
-
     private static final int RAPTOR_NODE_SAMPLE_SIZE = 80;
 
     private static final int RAPTOR_SOURCE_SAMPLE_SIZE = 5;
@@ -123,8 +119,6 @@ public class DocumentRagSnapshotServiceImpl implements DocumentRagSnapshotServic
     private static final int KG_GRAPH_ENTITY_LIMIT = 80;
 
     private static final int KG_GRAPH_RELATION_LIMIT = 120;
-
-    private static final int KG_GRAPH_COMMUNITY_LIMIT = 40;
 
     private static final int KG_GRAPH_EVIDENCE_LIMIT = 160;
 
@@ -160,8 +154,6 @@ public class DocumentRagSnapshotServiceImpl implements DocumentRagSnapshotServic
 
     private final SuperAgentKgRelationMapper kgRelationMapper;
 
-    private final SuperAgentKgCommunityMapper kgCommunityMapper;
-
     private final SuperAgentKgEvidenceMapper kgEvidenceMapper;
 
     private final SuperAgentRaptorNodeMapper raptorNodeMapper;
@@ -191,7 +183,6 @@ public class DocumentRagSnapshotServiceImpl implements DocumentRagSnapshotServic
         long tableCount = parseTaskId == null ? 0L : countTables(document.getId(), parseTaskId);
         long kgEntityCount = indexTaskId == null ? 0L : countKgEntities(document.getId(), indexTaskId);
         long kgRelationCount = indexTaskId == null ? 0L : countKgRelations(document.getId(), indexTaskId);
-        long kgCommunityCount = indexTaskId == null ? 0L : countKgCommunities(document.getId(), indexTaskId);
         long kgEvidenceCount = indexTaskId == null ? 0L : countKgEvidences(document.getId(), indexTaskId);
         long raptorNodeCount = indexTaskId == null ? 0L : countRaptorNodes(document.getId(), indexTaskId);
         GraphRagQualityReport graphRagQuality = graphRagQualityService.evaluate(document.getId(), indexTaskId);
@@ -203,7 +194,6 @@ public class DocumentRagSnapshotServiceImpl implements DocumentRagSnapshotServic
         List<DocumentRagSnapshotVo.TableItem> tables = listTables(document.getId(), parseTaskId, tableHighlightFocus(dto));
         List<DocumentRagSnapshotVo.KgEntityItem> kgEntities = listKgEntities(document.getId(), indexTaskId);
         List<DocumentRagSnapshotVo.KgRelationItem> kgRelations = listKgRelations(document.getId(), indexTaskId);
-        List<DocumentRagSnapshotVo.KgCommunityItem> kgCommunities = listKgCommunities(document.getId(), indexTaskId);
         List<DocumentRagSnapshotVo.RaptorNodeItem> raptorNodes = listRaptorNodes(document.getId(), indexTaskId);
 
         return new DocumentRagSnapshotVo(
@@ -213,9 +203,9 @@ public class DocumentRagSnapshotServiceImpl implements DocumentRagSnapshotServic
             indexTaskId,
             indexTask == null ? document.getCurrentPlanId() : indexTask.getPlanId(),
             buildMetrics(parseBlockCount, structureNodeCount, parentBlockCount, chunkCount, vectorReadyCount,
-                tableCount, kgEntityCount, kgRelationCount, kgCommunityCount, raptorNodeCount, graphRagQuality),
+                tableCount, kgEntityCount, kgRelationCount, raptorNodeCount, graphRagQuality),
             buildPipelineStages(parseBlockCount, structureNodeCount, parentBlockCount, chunkCount, tableCount,
-                kgEntityCount, kgRelationCount, kgCommunityCount, raptorNodeCount),
+                kgEntityCount, kgRelationCount, raptorNodeCount),
             null,
             parseBlocks,
             structureNodes,
@@ -224,10 +214,9 @@ public class DocumentRagSnapshotServiceImpl implements DocumentRagSnapshotServic
             tables,
             List.of(),
             buildArtifactGraph(document.getId(), parseBlockCount, structureNodeCount, parentBlockCount, chunkCount,
-                tableCount, kgEntityCount, kgCommunityCount, kgEvidenceCount, raptorNodeCount),
+                tableCount, kgEntityCount, kgEvidenceCount, raptorNodeCount),
             kgEntities,
             kgRelations,
-            kgCommunities,
             buildKgGraph(document.getId(), indexTaskId),
             raptorNodes,
             buildRaptorTree(raptorNodes),
@@ -342,7 +331,6 @@ public class DocumentRagSnapshotServiceImpl implements DocumentRagSnapshotServic
                                                                 long tableCount,
                                                                 long kgEntityCount,
                                                                 long kgRelationCount,
-                                                                long kgCommunityCount,
                                                                 long raptorNodeCount,
                                                                 GraphRagQualityReport graphRagQuality) {
         List<DocumentRagSnapshotVo.MetricItem> metrics = new ArrayList<>();
@@ -353,7 +341,6 @@ public class DocumentRagSnapshotServiceImpl implements DocumentRagSnapshotServic
         metrics.add(new DocumentRagSnapshotVo.MetricItem("向量成功", vectorReadyCount + "/" + chunkCount, "PGVector 中可参与语义检索的原文 chunk", chunkCount > 0 && vectorReadyCount == chunkCount ? "success" : "warning"));
         metrics.add(new DocumentRagSnapshotVo.MetricItem("表格", String.valueOf(tableCount), "结构化表格问答的表、列、行、单元格", tone(tableCount)));
         metrics.add(new DocumentRagSnapshotVo.MetricItem("知识图谱", kgEntityCount + " 实体 / " + kgRelationCount + " 关系", "GraphRAG 独立 KG，不等同于文档结构图", kgEntityCount > 0 || kgRelationCount > 0 ? "success" : "neutral"));
-        metrics.add(new DocumentRagSnapshotVo.MetricItem("图谱社区", String.valueOf(kgCommunityCount), "GraphRAG 社区摘要用于跨实体导航", tone(kgCommunityCount)));
         appendGraphRagQualityMetrics(metrics, graphRagQuality);
         metrics.add(new DocumentRagSnapshotVo.MetricItem("RAPTOR 节点", String.valueOf(raptorNodeCount), "层级摘要节点，只负责召回导航", tone(raptorNodeCount)));
         return metrics;
@@ -377,12 +364,11 @@ public class DocumentRagSnapshotServiceImpl implements DocumentRagSnapshotServic
             ratioTone(report.getEvidenceTraceabilityCoverage(), report.getEvidenceCount())
         ));
         long controlledCount = safeLong(report.getControlledExtractionItemCount())
-            + safeLong(report.getEntityResolutionEnhancedCount())
-            + safeLong(report.getCommunityReportEnhancedCount());
+            + safeLong(report.getEntityResolutionEnhancedCount());
         metrics.add(new DocumentRagSnapshotVo.MetricItem(
             "GraphRAG 受控增强",
             String.valueOf(controlledCount),
-            "LLM 受控 extraction、entity resolution、community report 通过 Java 校验后的命中数",
+            "LLM 受控 extraction、entity resolution 通过 Java 校验后的命中数",
             controlledCount > 0L ? "success" : "neutral"
         ));
     }
@@ -394,14 +380,13 @@ public class DocumentRagSnapshotServiceImpl implements DocumentRagSnapshotServic
                                                                               long tableCount,
                                                                               long kgEntityCount,
                                                                               long kgRelationCount,
-                                                                              long kgCommunityCount,
                                                                               long raptorNodeCount) {
         return List.of(
             new DocumentRagSnapshotVo.PipelineStageItem("parse", "解析产物", statusText(parseBlockCount), "文件经 Python rag-tools 解析为带页码、bbox、章节路径的基础块。", parseBlockCount),
             new DocumentRagSnapshotVo.PipelineStageItem("structure", "文档结构图", statusText(structureNodeCount), "保留 Document -> Section -> Item 层级，用于目录导航和结构问答。", structureNodeCount),
             new DocumentRagSnapshotVo.PipelineStageItem("parent-child", "父子切块", statusText(chunkCount), "Java 策略流水线生成 ParentBlock 和 ChildChunk，child 负责召回，parent 负责回答上下文。", parentBlockCount + chunkCount),
             new DocumentRagSnapshotVo.PipelineStageItem("table", "表格结构化", statusText(tableCount), "表格被拆成表、列、行、单元格，支撑字段过滤和表格问答。", tableCount),
-            new DocumentRagSnapshotVo.PipelineStageItem("graph-rag", "GraphRAG", statusText(kgEntityCount + kgRelationCount + kgCommunityCount), "实体、关系、证据、社区摘要是独立知识图谱，不和文档结构图混用。", kgEntityCount + kgRelationCount + kgCommunityCount),
+            new DocumentRagSnapshotVo.PipelineStageItem("graph-rag", "GraphRAG", statusText(kgEntityCount + kgRelationCount), "实体、关系、证据是独立知识图谱，不和文档结构图混用。", kgEntityCount + kgRelationCount),
             new DocumentRagSnapshotVo.PipelineStageItem("raptor", "RAPTOR", statusText(raptorNodeCount), "层级摘要树用于长文档导航，最终证据仍回落到原始 chunk。", raptorNodeCount),
             new DocumentRagSnapshotVo.PipelineStageItem("runtime", "运行时观测", "去对话观测查看", "检索通道、融合、rerank、引用修复属于每轮问答运行时数据。", 0L)
         );
@@ -905,7 +890,6 @@ public class DocumentRagSnapshotServiceImpl implements DocumentRagSnapshotServic
                                                                        long chunkCount,
                                                                        long tableCount,
                                                                        long kgEntityCount,
-                                                                       long kgCommunityCount,
                                                                        long kgEvidenceCount,
                                                                        long raptorNodeCount) {
         List<DocumentRagSnapshotVo.ArtifactGraphTypeStatItem> typeStats = List.of(
@@ -916,7 +900,6 @@ public class DocumentRagSnapshotServiceImpl implements DocumentRagSnapshotServic
             artifactTypeStat(DocumentRagArtifactType.TABLE, tableCount),
             artifactTypeStat(DocumentRagArtifactType.CHILD_CHUNK, chunkCount),
             artifactTypeStat(DocumentRagArtifactType.KG_ENTITY, kgEntityCount),
-            artifactTypeStat(DocumentRagArtifactType.KG_COMMUNITY, kgCommunityCount),
             artifactTypeStat(DocumentRagArtifactType.KG_EVIDENCE, kgEvidenceCount),
             artifactTypeStat(DocumentRagArtifactType.RAPTOR_NODE, raptorNodeCount)
         );
@@ -1007,7 +990,7 @@ public class DocumentRagSnapshotServiceImpl implements DocumentRagSnapshotServic
 
     private DocumentRagSnapshotVo.KgGraphItem buildKgGraph(Long documentId, Long indexTaskId) {
         if (indexTaskId == null) {
-            return new DocumentRagSnapshotVo.KgGraphItem(List.of(), List.of(), List.of(), List.of(), List.of());
+            return new DocumentRagSnapshotVo.KgGraphItem(List.of(), List.of(), List.of(), List.of());
         }
         List<SuperAgentKgEntity> entities = kgEntityMapper.selectList(new LambdaQueryWrapper<SuperAgentKgEntity>()
             .eq(SuperAgentKgEntity::getDocumentId, documentId)
@@ -1022,12 +1005,6 @@ public class DocumentRagSnapshotServiceImpl implements DocumentRagSnapshotServic
             .orderByDesc(SuperAgentKgRelation::getWeight)
             .orderByAsc(SuperAgentKgRelation::getId)
             .last("limit " + KG_GRAPH_RELATION_LIMIT));
-        List<SuperAgentKgCommunity> communities = kgCommunityMapper.selectList(new LambdaQueryWrapper<SuperAgentKgCommunity>()
-            .eq(SuperAgentKgCommunity::getDocumentId, documentId)
-            .eq(SuperAgentKgCommunity::getTaskId, indexTaskId)
-            .eq(SuperAgentKgCommunity::getStatus, BusinessStatus.YES.getCode())
-            .orderByAsc(SuperAgentKgCommunity::getCommunityNo, SuperAgentKgCommunity::getId)
-            .last("limit " + KG_GRAPH_COMMUNITY_LIMIT));
         List<SuperAgentKgEvidence> evidences = listKgEvidenceRecords(documentId, indexTaskId, KG_GRAPH_EVIDENCE_LIMIT);
         Map<Long, Integer> evidenceCountByEntityId = evidences.stream()
             .filter(evidence -> evidence.getEntityId() != null)
@@ -1039,10 +1016,6 @@ public class DocumentRagSnapshotServiceImpl implements DocumentRagSnapshotServic
             .filter(evidence -> evidence.getEntityId() != null && evidence.getChunkId() != null)
             .collect(Collectors.groupingBy(SuperAgentKgEvidence::getEntityId, LinkedHashMap::new,
                 Collectors.collectingAndThen(Collectors.mapping(SuperAgentKgEvidence::getChunkId, Collectors.toSet()), Set::size)));
-        Map<Long, Long> communityIdByEntityId = communities.stream()
-            .flatMap(community -> readLongList(community.getEntityIdsJson()).stream()
-                .map(entityId -> Map.entry(entityId, community.getId())))
-            .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (left, right) -> left, LinkedHashMap::new));
         Map<Long, SuperAgentKgEntity> entityMap = entities.stream()
             .collect(Collectors.toMap(SuperAgentKgEntity::getId, Function.identity(), (left, right) -> left, LinkedHashMap::new));
 
@@ -1056,7 +1029,6 @@ public class DocumentRagSnapshotServiceImpl implements DocumentRagSnapshotServic
                     StrUtil.blankToDefault(entity.getName(), entity.getEntityKey()),
                     entity.getEntityType(),
                     preview(entity.getDescription()),
-                    communityIdByEntityId.get(entity.getId()),
                     doubleValue(metadata.get("pagerank")),
                     integerValue(metadata.get("rankPosition")),
                     degree,
@@ -1088,25 +1060,6 @@ public class DocumentRagSnapshotServiceImpl implements DocumentRagSnapshotServic
             ))
             .toList();
 
-        List<DocumentRagSnapshotVo.KgGraphCommunityItem> communityItems = communities.stream()
-            .map(community -> {
-                Map<String, Object> metadata = readMap(community.getMetadataJson());
-                List<Long> communityEntityIds = readLongList(community.getEntityIdsJson());
-                List<Long> communityRelationIds = readLongList(community.getRelationIdsJson());
-                List<Long> communityEvidenceIds = readLongList(community.getEvidenceIdsJson());
-                return new DocumentRagSnapshotVo.KgGraphCommunityItem(
-                    community.getId(),
-                    community.getCommunityNo(),
-                    StrUtil.blankToDefault(community.getTitle(), "社区 #" + valueOrDash(community.getCommunityNo())),
-                    preview(community.getSummary()),
-                    communityEntityIds.size(),
-                    communityRelationIds.size(),
-                    communityEvidenceIds.size(),
-                    decimalText(bigDecimalValue(firstPresent(metadata.get("rankScore"), metadata.get("globalRankScore"))))
-                );
-            })
-            .toList();
-
         List<DocumentRagSnapshotVo.KgGraphEvidenceItem> evidenceItems = evidences.stream()
             .map(evidence -> {
                 Map<String, Object> metadata = readMap(evidence.getMetadataJson());
@@ -1132,12 +1085,10 @@ public class DocumentRagSnapshotServiceImpl implements DocumentRagSnapshotServic
             List.of(
                 new DocumentRagSnapshotVo.MetricItem("实体", String.valueOf(nodes.size()), "当前快照载入的 GraphRAG 实体", tone(nodes.size())),
                 new DocumentRagSnapshotVo.MetricItem("关系", String.valueOf(edges.size()), "实体之间的关系边；没有关系时不伪造", tone(edges.size())),
-                new DocumentRagSnapshotVo.MetricItem("社区", String.valueOf(communityItems.size()), "community report 和实体集合", tone(communityItems.size())),
                 new DocumentRagSnapshotVo.MetricItem("证据", String.valueOf(evidenceItems.size()), "可回到 chunk/parent/page 的 KG evidence", tone(evidenceItems.size()))
             ),
             nodes,
             edges,
-            communityItems,
             evidenceItems
         );
     }
@@ -1372,27 +1323,6 @@ public class DocumentRagSnapshotServiceImpl implements DocumentRagSnapshotServic
                 relation.getRelationType(),
                 preview(relation.getDescription()),
                 decimalText(relation.getWeight())
-            ))
-            .toList();
-    }
-
-    private List<DocumentRagSnapshotVo.KgCommunityItem> listKgCommunities(Long documentId, Long indexTaskId) {
-        if (indexTaskId == null) {
-            return List.of();
-        }
-        return kgCommunityMapper.selectList(new LambdaQueryWrapper<SuperAgentKgCommunity>()
-                .eq(SuperAgentKgCommunity::getDocumentId, documentId)
-                .eq(SuperAgentKgCommunity::getTaskId, indexTaskId)
-                .eq(SuperAgentKgCommunity::getStatus, BusinessStatus.YES.getCode())
-                .orderByAsc(SuperAgentKgCommunity::getCommunityNo, SuperAgentKgCommunity::getId)
-                .last("limit " + KG_COMMUNITY_SAMPLE_SIZE))
-            .stream()
-            .map(item -> new DocumentRagSnapshotVo.KgCommunityItem(
-                item.getId(),
-                item.getCommunityNo(),
-                item.getTitle(),
-                preview(item.getSummary()),
-                item.getEntityIdsJson()
             ))
             .toList();
     }
@@ -1776,13 +1706,6 @@ public class DocumentRagSnapshotServiceImpl implements DocumentRagSnapshotServic
             .eq(SuperAgentKgRelation::getStatus, BusinessStatus.YES.getCode()));
     }
 
-    private long countKgCommunities(Long documentId, Long taskId) {
-        return kgCommunityMapper.selectCount(new LambdaQueryWrapper<SuperAgentKgCommunity>()
-            .eq(SuperAgentKgCommunity::getDocumentId, documentId)
-            .eq(SuperAgentKgCommunity::getTaskId, taskId)
-            .eq(SuperAgentKgCommunity::getStatus, BusinessStatus.YES.getCode()));
-    }
-
     private long countKgEvidences(Long documentId, Long taskId) {
         return kgEvidenceMapper.selectCount(new LambdaQueryWrapper<SuperAgentKgEvidence>()
             .eq(SuperAgentKgEvidence::getDocumentId, documentId)
@@ -2024,24 +1947,6 @@ public class DocumentRagSnapshotServiceImpl implements DocumentRagSnapshotServic
 
     private String stringValue(Object value) {
         return value == null ? "" : String.valueOf(value);
-    }
-
-    private BigDecimal bigDecimalValue(Object value) {
-        if (value instanceof BigDecimal decimal) {
-            return decimal;
-        }
-        if (value instanceof Number number) {
-            return BigDecimal.valueOf(number.doubleValue());
-        }
-        if (value instanceof String text && StrUtil.isNotBlank(text)) {
-            try {
-                return new BigDecimal(text.trim());
-            }
-            catch (NumberFormatException ignored) {
-                return null;
-            }
-        }
-        return null;
     }
 
     private Double doubleValue(Object value) {

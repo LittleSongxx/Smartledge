@@ -10,11 +10,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.smartledge.ai.manage.data.SuperAgentDocumentChunk;
-import org.smartledge.ai.knowledge.augmentation.data.SuperAgentKgCommunity;
 import org.smartledge.ai.knowledge.augmentation.data.SuperAgentKgEntity;
 import org.smartledge.ai.knowledge.augmentation.data.SuperAgentKgEvidence;
 import org.smartledge.ai.knowledge.augmentation.data.SuperAgentKgRelation;
-import org.smartledge.ai.knowledge.augmentation.mapper.SuperAgentKgCommunityMapper;
 import org.smartledge.ai.manage.mapper.SuperAgentDocumentChunkMapper;
 import org.smartledge.ai.knowledge.augmentation.mapper.SuperAgentKgEntityMapper;
 import org.smartledge.ai.knowledge.augmentation.mapper.SuperAgentKgEvidenceMapper;
@@ -52,16 +50,11 @@ public class GraphRagTypedChunkServiceImpl implements GraphRagTypedChunkService 
 
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
-    private static final TypeReference<List<Long>> LONG_LIST_TYPE = new TypeReference<>() {
-    };
     private static final int MAX_EVIDENCE_QUOTES = 4;
-    private static final int MAX_COMMUNITY_ENTITY_NAMES = 16;
-    private static final int MAX_COMMUNITY_RELATION_PATHS = 12;
 
     private final SuperAgentKgEntityMapper entityMapper;
     private final SuperAgentKgRelationMapper relationMapper;
     private final SuperAgentKgEvidenceMapper evidenceMapper;
-    private final SuperAgentKgCommunityMapper communityMapper;
     private final SuperAgentDocumentChunkMapper chunkMapper;
     private final DocumentVectorGateway vectorGateway;
     private final ObjectProvider<DocumentKeywordSearchGateway> keywordSearchGatewayProvider;
@@ -110,14 +103,12 @@ public class GraphRagTypedChunkServiceImpl implements GraphRagTypedChunkService 
         List<SuperAgentKgEntity> entities = listEntities(documentId, taskId);
         List<SuperAgentKgRelation> relations = listRelations(documentId, taskId);
         List<SuperAgentKgEvidence> evidences = listEvidences(documentId, taskId);
-        List<SuperAgentKgCommunity> communities = listCommunities(documentId, taskId);
-        if (entities.isEmpty() && relations.isEmpty() && communities.isEmpty()) {
+        if (entities.isEmpty() && relations.isEmpty()) {
             return List.of();
         }
 
         Map<Long, SuperAgentDocumentChunk> chunkMap = indexChunks(sourceChunks);
         Map<Long, SuperAgentKgEntity> entityMap = indexById(entities);
-        Map<Long, SuperAgentKgRelation> relationMap = indexById(relations);
         Map<Long, List<SuperAgentKgEvidence>> evidenceByEntity = evidences.stream()
             .filter(evidence -> evidence.getEntityId() != null)
             .collect(Collectors.groupingBy(
@@ -132,7 +123,6 @@ public class GraphRagTypedChunkServiceImpl implements GraphRagTypedChunkService 
                 LinkedHashMap::new,
                 Collectors.toList()
             ));
-        Map<Long, SuperAgentKgEvidence> evidenceMap = indexById(evidences);
 
         List<SuperAgentDocumentChunk> chunks = new ArrayList<>();
         int chunkNo = Math.max(1, startChunkNo);
@@ -147,14 +137,6 @@ public class GraphRagTypedChunkServiceImpl implements GraphRagTypedChunkService 
         for (SuperAgentKgRelation relation : relations) {
             SuperAgentDocumentChunk chunk = buildRelationChunk(documentId, taskId, planId, chunkNo, relation,
                 entityMap, evidenceByRelation.getOrDefault(relation.getId(), List.of()), chunkMap);
-            if (chunk != null) {
-                chunks.add(chunk);
-                chunkNo++;
-            }
-        }
-        for (SuperAgentKgCommunity community : communities) {
-            SuperAgentDocumentChunk chunk = buildCommunityChunk(documentId, taskId, planId, chunkNo, community,
-                entityMap, relationMap, evidenceMap, chunkMap);
             if (chunk != null) {
                 chunks.add(chunk);
                 chunkNo++;
@@ -337,90 +319,6 @@ public class GraphRagTypedChunkServiceImpl implements GraphRagTypedChunkService 
             metadataSupport.writeSourceMetadata(sourceMetadata));
     }
 
-    private SuperAgentDocumentChunk buildCommunityChunk(Long documentId,
-                                                        Long taskId,
-                                                        Long planId,
-                                                        int chunkNo,
-                                                        SuperAgentKgCommunity community,
-                                                        Map<Long, SuperAgentKgEntity> entityMap,
-                                                        Map<Long, SuperAgentKgRelation> relationMap,
-                                                        Map<Long, SuperAgentKgEvidence> evidenceMap,
-                                                        Map<Long, SuperAgentDocumentChunk> chunkMap) {
-        if (community == null || community.getId() == null) {
-            return null;
-        }
-        List<Long> entityIds = readLongList(community.getEntityIdsJson());
-        List<Long> relationIds = readLongList(community.getRelationIdsJson());
-        List<Long> evidenceIds = readLongList(community.getEvidenceIdsJson());
-        List<SuperAgentKgEvidence> evidences = evidenceIds.stream()
-            .map(evidenceMap::get)
-            .filter(Objects::nonNull)
-            .toList();
-        EvidenceAnchor anchor = resolveAnchor(evidences, evidenceChunkIds(evidences), chunkMap);
-        if (anchor == null || anchor.parentBlockId() == null) {
-            return null;
-        }
-
-        List<String> entityNames = entityIds.stream()
-            .map(entityMap::get)
-            .filter(Objects::nonNull)
-            .map(SuperAgentKgEntity::getName)
-            .filter(StrUtil::isNotBlank)
-            .limit(MAX_COMMUNITY_ENTITY_NAMES)
-            .toList();
-        List<String> relationPaths = relationIds.stream()
-            .map(relationMap::get)
-            .filter(Objects::nonNull)
-            .map(relation -> relationPath(relation, entityMap))
-            .filter(StrUtil::isNotBlank)
-            .limit(MAX_COMMUNITY_RELATION_PATHS)
-            .toList();
-        List<String> quotes = evidenceQuotes(evidences);
-        Map<String, Object> metadata = readMap(community.getMetadataJson());
-        String rankBoost = numberText(metadata.get("rankBoost"));
-        String title = StrUtil.blankToDefault(community.getTitle(), "GraphRAG 社区 " + community.getCommunityNo());
-        String text = joinSections(
-            "[GraphRAG 社区]",
-            "社区：" + title,
-            "摘要：" + StrUtil.blankToDefault(community.getSummary(), ""),
-            StrUtil.isBlank(rankBoost) ? "" : "图谱Rank：" + rankBoost,
-            entityNames.isEmpty() ? "" : "核心实体：" + String.join("、", entityNames),
-            relationPaths.isEmpty() ? "" : "核心关系：\n" + bulletLines(relationPaths),
-            quotes.isEmpty() ? "" : "证据：\n" + bulletLines(quotes)
-        );
-        String contentWithWeight = joinSections(
-            "GraphRAG community typed chunk",
-            "社区 " + title,
-            "社区摘要 " + StrUtil.blankToDefault(community.getSummary(), ""),
-            StrUtil.isBlank(rankBoost) ? "" : "图谱Rank " + rankBoost,
-            "核心实体 " + String.join(" ", entityNames),
-            "核心关系 " + String.join(" ", relationPaths),
-            "证据 " + String.join(" ", quotes)
-        );
-
-        Map<String, Object> sourceMetadata = new LinkedHashMap<>();
-        sourceMetadata.put(GraphRagTypedChunkMetadataSupport.KG_TYPE, "community");
-        sourceMetadata.put(DocumentKnowledgeMetadataKeys.KG_COMMUNITY_ID, community.getId());
-        sourceMetadata.put(DocumentKnowledgeMetadataKeys.KG_COMMUNITY_TITLE, title);
-        sourceMetadata.put(DocumentKnowledgeMetadataKeys.KG_COMMUNITY_SUMMARY, community.getSummary());
-        sourceMetadata.put(DocumentKnowledgeMetadataKeys.KG_EVIDENCE_ID, anchor.evidenceId());
-        sourceMetadata.put(GraphRagTypedChunkMetadataSupport.KG_ENTITY_IDS, entityIds);
-        sourceMetadata.put(GraphRagTypedChunkMetadataSupport.KG_RELATION_IDS, relationIds);
-        sourceMetadata.put(GraphRagTypedChunkMetadataSupport.KG_EVIDENCE_IDS, evidenceIds);
-        sourceMetadata.put(GraphRagTypedChunkMetadataSupport.KG_SOURCE_CHUNK_IDS, evidenceChunkIds(evidences));
-        sourceMetadata.put(GraphRagTypedChunkMetadataSupport.KG_SOURCE_PARENT_BLOCK_IDS, evidenceParentBlockIds(evidences, chunkMap));
-        sourceMetadata.put(DocumentKnowledgeMetadataKeys.KG_RANK_BOOST, metadata.get("rankBoost"));
-
-        return baseChunk(documentId, taskId, planId, chunkNo, anchor,
-            GraphRagTypedChunkMetadataSupport.CHUNK_TYPE_COMMUNITY,
-            title,
-            text,
-            contentWithWeight,
-            jsonArray(keywordValues("GraphRAG", "community", "社区", title, entityNames)),
-            jsonArray(questionValues(title + " 概括了哪些内容？", title + " 包含哪些实体和关系？")),
-            metadataSupport.writeSourceMetadata(sourceMetadata));
-    }
-
     private SuperAgentDocumentChunk baseChunk(Long documentId,
                                               Long taskId,
                                               Long planId,
@@ -488,15 +386,6 @@ public class GraphRagTypedChunkServiceImpl implements GraphRagTypedChunkService 
             .orderByAsc(SuperAgentKgEvidence::getId));
     }
 
-    private List<SuperAgentKgCommunity> listCommunities(Long documentId, Long taskId) {
-        return communityMapper.selectList(new LambdaQueryWrapper<SuperAgentKgCommunity>()
-            .eq(SuperAgentKgCommunity::getDocumentId, documentId)
-            .eq(SuperAgentKgCommunity::getTaskId, taskId)
-            .eq(SuperAgentKgCommunity::getStatus, BusinessStatus.YES.getCode())
-            .orderByAsc(SuperAgentKgCommunity::getCommunityNo)
-            .orderByAsc(SuperAgentKgCommunity::getId));
-    }
-
     private EvidenceAnchor resolveAnchor(List<SuperAgentKgEvidence> evidences,
                                          Collection<Long> fallbackChunkIds,
                                          Map<Long, SuperAgentDocumentChunk> chunkMap) {
@@ -554,16 +443,6 @@ public class GraphRagTypedChunkServiceImpl implements GraphRagTypedChunkService 
         );
     }
 
-    private String relationPath(SuperAgentKgRelation relation, Map<Long, SuperAgentKgEntity> entityMap) {
-        SuperAgentKgEntity source = entityMap.get(relation.getSourceEntityId());
-        SuperAgentKgEntity target = entityMap.get(relation.getTargetEntityId());
-        if (source == null || target == null) {
-            return "";
-        }
-        return source.getName() + " -[" + GraphRagRelationAuthority.presentationLabel(readMap(relation.getMetadataJson()))
-            + "]-> " + target.getName();
-    }
-
     private Map<Long, SuperAgentDocumentChunk> indexChunks(List<SuperAgentDocumentChunk> sourceChunks) {
         if (CollUtil.isEmpty(sourceChunks)) {
             return Map.of();
@@ -614,18 +493,6 @@ public class GraphRagTypedChunkServiceImpl implements GraphRagTypedChunkService 
         }
         catch (Exception exception) {
             return Map.of();
-        }
-    }
-
-    private List<Long> readLongList(String json) {
-        if (StrUtil.isBlank(json)) {
-            return List.of();
-        }
-        try {
-            return objectMapper.readValue(json, LONG_LIST_TYPE);
-        }
-        catch (Exception exception) {
-            return List.of();
         }
     }
 

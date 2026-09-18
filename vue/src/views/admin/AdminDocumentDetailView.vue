@@ -950,7 +950,6 @@ const ragArtifactSampleCount = computed(() => {
     'tables',
     'kgEntities',
     'kgRelations',
-    'kgCommunities',
     'raptorNodes',
     'buildLogs'
   ].reduce((sum, key) => sum + asArray(ragSnapshot.value?.[key]).length, 0)

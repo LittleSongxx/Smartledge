@@ -30,8 +30,8 @@ spring:
       host: 127.0.0.1
       # Redis 服务端口；本地依赖栈映射为 6381。
       port: 6381
-      # Redis 访问密码。
-      password: ${SMARTLEDGE_REDIS_PASSWORD:smartledge}
+      # Redis 访问密码。生产必须由环境变量注入；本地开发用 local profile（application-local.yaml）。
+      password: ${SMARTLEDGE_REDIS_PASSWORD}
       # Redis 操作超时时间，单位：毫秒。
       timeout: 3000  
   datasource:
@@ -39,8 +39,8 @@ spring:
     url: jdbc:mysql://127.0.0.1:3307/smartledge?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
     # 业务 MySQL 数据库的连接用户名。
     username: root
-    # 业务 MySQL 数据库的连接密码。
-    password: ${SMARTLEDGE_MYSQL_PASSWORD:smartledge}
+    # 业务 MySQL 数据库的连接密码。生产必须由环境变量注入；本地开发用 local profile。
+    password: ${SMARTLEDGE_MYSQL_PASSWORD}
     # 业务 MySQL 数据源使用的 JDBC 驱动类。
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
@@ -63,8 +63,8 @@ spring:
     # RabbitMQ 服务地址与端口；本地依赖栈见 deploy/docker-compose.yml。
     host: 127.0.0.1
     port: 5672
-    username: ${SMARTLEDGE_RABBITMQ_USER:smartledge}
-    password: ${SMARTLEDGE_RABBITMQ_PASSWORD:smartledge}
+    username: ${SMARTLEDGE_RABBITMQ_USER}
+    password: ${SMARTLEDGE_RABBITMQ_PASSWORD}
     virtual-host: /
     connection-timeout: 10s
     # 开启发布方确认与不可路由回退，DocumentMessagePublisher 依赖两者判断投递是否真正成功。
@@ -197,12 +197,9 @@ app:
       # 上传的原始文件和解析后的纯文本都会放在这里。
       # 本地一般是 9000 端口；如果你是 docker 启动的 MinIO，这里填宿主机映射地址。
       endpoint: http://127.0.0.1:9000
-      # MinIO 访问账号。
-      # 本地依赖栈默认账号，生产环境必须通过环境变量注入专用 AK。
-      access-key: ${SMARTLEDGE_MINIO_USER:smartledge}
-      # MinIO 访问密码。
-      # 生产环境不要直接写死在配置文件里，建议通过环境变量或配置中心下发。
-      secret-key: ${SMARTLEDGE_MINIO_PASSWORD:smartledge123}
+      # MinIO 访问账号与密码。生产必须由环境变量注入专用凭据；本地开发用 local profile。
+      access-key: ${SMARTLEDGE_MINIO_USER}
+      secret-key: ${SMARTLEDGE_MINIO_PASSWORD}
       # 文档管理模块统一使用的 bucket 名称。
       # 应用启动时会自动检查这个 bucket 是否存在，不存在就自动创建。
       bucket-name: ${prefix.distinction.name:smartledge}-document
@@ -252,8 +249,8 @@ app:
       # 必须是**非超级用户**：超级用户（postgres）绕过 RLS，用它连库时向量表的租户策略等于不存在。
       # 角色、授权与策略启用见 sql/表结构/迁移/S21-向量表租户化-PostgresSql.sql 末尾的「启用 RLS」。
       username: smartledge_app
-      # PostgreSQL 密码（本地默认与其它开发口令一致；生产必须只从环境变量注入强口令）。
-      password: ${SMARTLEDGE_PG_APP_PASSWORD:smartledge}
+      # PostgreSQL 密码。生产必须只从环境变量注入强口令；本地开发用 local profile。
+      password: ${SMARTLEDGE_PG_APP_PASSWORD}
       # 连接池名称，方便日志和监控定位。
       pool-name: smartledge-manage-pgvector-hikari
       # 连接池最大连接数。
@@ -268,8 +265,8 @@ app:
         - http://127.0.0.1:9201
       # Elasticsearch 用户名。
       username: elastic
-      # Elasticsearch 密码。
-      password: ${ELASTICSEARCH_PASSWORD:elastic}
+      # Elasticsearch 密码。生产必须由环境变量注入；本地开发用 local profile。
+      password: ${ELASTICSEARCH_PASSWORD}
       # 关键词索引名称。
       index-name: ${prefix.distinction.name:smartledge}-document-keyword
       # 导航层结构节点索引名称，粒度是 section/step/list_item，不和 chunk 级关键词索引混用。
@@ -285,20 +282,6 @@ app:
       connect-timeout-millis: 3000
       # 读超时，毫秒。
       socket-timeout-millis: 5000
-    neo4j:
-      # 是否启用 Neo4j 结构图投影查询。MySQL 结构节点表始终是权威结构数据源；Neo4j 用于结构导航加速和图查询展示。
-      enabled: true
-      # Neo4j 连接地址，包含协议、主机及 Bolt 端口。
-      uri: bolt://127.0.0.1:7687
-      # Neo4j 数据库连接用户名。
-      username: neo4j
-      # Neo4j 数据库连接密码。
-      password: ${NEO4J_PASSWORD:smartledge2026}
-      # Neo4j 连接后使用的数据库名称。
-      database: neo4j
-      # Cypher 语句的事务超时时间，单位：秒。
-      query-timeout-seconds: 5
-
 logging:
   level:
     # 项目聊天与 RAG 运行时模块的日志级别。

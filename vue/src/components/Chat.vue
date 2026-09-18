@@ -14,6 +14,8 @@ import {
   ArrowPathIcon,
   CheckIcon,
   DocumentDuplicateIcon,
+  HandThumbDownIcon,
+  HandThumbUpIcon,
   SparklesIcon
 } from '@heroicons/vue/24/outline'
 import { Button } from '@/components/ui/button'
@@ -27,7 +29,7 @@ const props = defineProps({
   showRecommendations: { type: Boolean, default: false }
 })
 
-const emit = defineEmits(['recommend', 'retry'])
+const emit = defineEmits(['recommend', 'retry', 'feedback'])
 const contentRef = ref(null)
 const citationDisclosureRef = ref(null)
 const copied = ref(false)
@@ -64,6 +66,13 @@ const showRecommendationBar = computed(() => {
     && props.message.recommendations.length > 0
 })
 const canRetry = computed(() => showErrorNotice.value && Boolean(props.message.question))
+
+// 终态轮次才可评价：RUNNING 的答案还在变，评价没有意义。
+const showFeedbackBar = computed(() => {
+  return !isUser.value
+    && !props.isStreaming
+    && ['COMPLETED', 'STOPPED', 'FAILED'].includes(String(props.message.status || '').toUpperCase())
+})
 
 function escapeHtml(value) {
   return String(value)
@@ -212,6 +221,31 @@ onMounted(() => { if (!isUser.value) highlightCodeBlocks() })
         :references="message.references"
         :route-explain="message.routeExplain"
       />
+
+      <div v-if="showFeedbackBar" class="mt-3 flex items-center gap-2" aria-label="本轮回答是否有帮助">
+        <Button
+          variant="ghost"
+          size="sm"
+          type="button"
+          :class="['gap-1', message.feedbackRating === 'UP' ? 'text-emerald-600' : 'text-muted-foreground']"
+          :aria-pressed="message.feedbackRating === 'UP'"
+          @click="emit('feedback', 'UP')"
+        >
+          <HandThumbUpIcon data-icon="inline-start" class="size-4" />
+          有帮助
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          type="button"
+          :class="['gap-1', message.feedbackRating === 'DOWN' ? 'text-rose-600' : 'text-muted-foreground']"
+          :aria-pressed="message.feedbackRating === 'DOWN'"
+          @click="emit('feedback', 'DOWN')"
+        >
+          <HandThumbDownIcon data-icon="inline-start" class="size-4" />
+          没帮助
+        </Button>
+      </div>
 
       <section v-if="showRecommendationBar" class="mt-5 border-t border-border pt-4" aria-label="推荐追问">
         <p class="mb-2 text-xs font-medium text-muted-foreground">推荐追问</p>

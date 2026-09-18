@@ -55,7 +55,6 @@ import org.smartledge.ai.manage.service.DocumentNavigationIndexService;
 import org.smartledge.ai.manage.service.DocumentParseArtifactService;
 import org.smartledge.ai.manage.service.DocumentParseRouteProgressCacheService;
 import org.smartledge.ai.manage.service.DocumentStorageService;
-import org.smartledge.ai.manage.service.DocumentStructureGraphProjectionService;
 import org.smartledge.ai.manage.service.DocumentStructureNodeService;
 import org.smartledge.ai.manage.service.DocumentStrategyService;
 import org.smartledge.ai.manage.service.DocumentTaskLogService;
@@ -189,8 +188,6 @@ public class DocumentManageServiceImpl implements DocumentManageService {
     private final ObjectProvider<DocumentKeywordSearchGateway> keywordSearchGatewayProvider;
 
     private final ObjectProvider<DocumentNavigationIndexService> navigationIndexServiceProvider;
-
-    private final ObjectProvider<DocumentStructureGraphProjectionService> graphProjectionServiceProvider;
 
     private final ObjectProvider<KnowledgeRouteIndexService> knowledgeRouteIndexServiceProvider;
 
@@ -486,12 +483,6 @@ public class DocumentManageServiceImpl implements DocumentManageService {
             log.info("删除知识路由索引中的文档快照: documentId={}", documentId);
             knowledgeRouteIndexService.deleteDocumentRoute(documentId);
         }
-        DocumentStructureGraphProjectionService graphProjectionService = graphProjectionServiceProvider.getIfAvailable();
-        if (graphProjectionService != null && graphProjectionService.enabled()) {
-            log.info("删除文档结构图投影: documentId={}", documentId);
-            graphProjectionService.deleteByDocumentId(documentId);
-        }
-
         documentProfileMapper.delete(new LambdaQueryWrapper<SuperAgentDocumentProfile>()
             .eq(SuperAgentDocumentProfile::getDocumentId, documentId));
         topicDocumentRelationMapper.delete(new LambdaQueryWrapper<SuperAgentTopicDocumentRelation>()
