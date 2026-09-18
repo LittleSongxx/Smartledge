@@ -1,21 +1,128 @@
 {
   "schemaVersion": "rag-gold.v1",
-  "description": "Replayable gold set for rank metrics only. Identities are synthetic citation keys for the scorer, not live index IDs. Score a live probe or archive with rag-gold-replay.v1. empty-scope cases use emptyScopeCorrectness, not mean Recall.",
+  "description": "Replayable gold set for rank metrics only. Identities are synthetic citation keys for the scorer, not live index IDs. Score a live probe or archive with rag-gold-replay.v1. empty-scope cases must declare \"caseType\": \"EMPTY_SCOPE\" explicitly (empty relevantIdentities on a RANKING case is rejected at load time). empty-scope cases use emptyScopeCorrectness, not mean Recall.",
   "cases": [
-    {"id": "gold-leave-window", "query": "请假需要提前多久申请", "relevantIdentities": ["CHUNK:101:201"], "k": 5},
-    {"id": "gold-reimburse-receipt", "query": "报销必须附哪些凭证", "relevantIdentities": ["CHUNK:102:301", "CHUNK:102:302"], "k": 5},
-    {"id": "gold-empty-scope", "query": "没有授权范围时能否编造答案", "relevantIdentities": [], "k": 5},
-    {"id": "gold-travel-days", "query": "差旅住宿上限几天", "relevantIdentities": ["CHUNK:103:401"], "k": 5},
-    {"id": "gold-invoice-title", "query": "发票抬头必须写什么", "relevantIdentities": ["CHUNK:104:501"], "k": 5},
-    {"id": "gold-seal-rule", "query": "公章使用谁审批", "relevantIdentities": ["CHUNK:105:601", "CHUNK:105:602"], "k": 5},
-    {"id": "gold-oncall", "query": "P1 事故必须记录哪些字段", "relevantIdentities": ["CHUNK:106:701"], "k": 5},
-    {"id": "gold-ocr-sample", "query": "O2 文档解析 OCR 验收样例", "relevantIdentities": ["CHUNK:107:801"], "k": 5},
-    {"id": "gold-parent-block", "query": "父块标题如何引用", "relevantIdentities": ["PARENT:108:1"], "k": 5},
-    {"id": "gold-summary", "query": "图谱社区摘要说了什么", "relevantIdentities": ["SUMMARY:109:1"], "k": 5},
-    {"id": "gold-table-row", "query": "费率表第二行金额", "relevantIdentities": ["TABLE:110:2"], "k": 5},
-    {"id": "gold-tool-hit", "query": "工具检索到的同一 chunk", "relevantIdentities": ["CHUNK:111:901"], "k": 5},
-    {"id": "gold-multi-doc", "query": "两份手册都写了的安全条款", "relevantIdentities": ["CHUNK:112:1001", "CHUNK:113:1002"], "k": 5},
-    {"id": "gold-expired-exclude", "query": "过期制度还能否引用", "relevantIdentities": ["CHUNK:114:1101"], "k": 5},
-    {"id": "gold-tombstone-exclude", "query": "已下线文档还能否召回", "relevantIdentities": ["CHUNK:115:1201"], "k": 5}
+    {
+      "id": "gold-leave-window",
+      "query": "请假需要提前多久申请",
+      "relevantIdentities": [
+        "CHUNK:101:201"
+      ],
+      "k": 5
+    },
+    {
+      "id": "gold-reimburse-receipt",
+      "query": "报销必须附哪些凭证",
+      "relevantIdentities": [
+        "CHUNK:102:301",
+        "CHUNK:102:302"
+      ],
+      "k": 5
+    },
+    {
+      "id": "gold-empty-scope",
+      "query": "没有授权范围时能否编造答案",
+      "relevantIdentities": [],
+      "k": 5,
+      "caseType": "EMPTY_SCOPE"
+    },
+    {
+      "id": "gold-travel-days",
+      "query": "差旅住宿上限几天",
+      "relevantIdentities": [
+        "CHUNK:103:401"
+      ],
+      "k": 5
+    },
+    {
+      "id": "gold-invoice-title",
+      "query": "发票抬头必须写什么",
+      "relevantIdentities": [
+        "CHUNK:104:501"
+      ],
+      "k": 5
+    },
+    {
+      "id": "gold-seal-rule",
+      "query": "公章使用谁审批",
+      "relevantIdentities": [
+        "CHUNK:105:601",
+        "CHUNK:105:602"
+      ],
+      "k": 5
+    },
+    {
+      "id": "gold-oncall",
+      "query": "P1 事故必须记录哪些字段",
+      "relevantIdentities": [
+        "CHUNK:106:701"
+      ],
+      "k": 5
+    },
+    {
+      "id": "gold-ocr-sample",
+      "query": "O2 文档解析 OCR 验收样例",
+      "relevantIdentities": [
+        "CHUNK:107:801"
+      ],
+      "k": 5
+    },
+    {
+      "id": "gold-parent-block",
+      "query": "父块标题如何引用",
+      "relevantIdentities": [
+        "PARENT:108:1"
+      ],
+      "k": 5
+    },
+    {
+      "id": "gold-summary",
+      "query": "图谱社区摘要说了什么",
+      "relevantIdentities": [
+        "SUMMARY:109:1"
+      ],
+      "k": 5
+    },
+    {
+      "id": "gold-table-row",
+      "query": "费率表第二行金额",
+      "relevantIdentities": [
+        "TABLE:110:2"
+      ],
+      "k": 5
+    },
+    {
+      "id": "gold-tool-hit",
+      "query": "工具检索到的同一 chunk",
+      "relevantIdentities": [
+        "CHUNK:111:901"
+      ],
+      "k": 5
+    },
+    {
+      "id": "gold-multi-doc",
+      "query": "两份手册都写了的安全条款",
+      "relevantIdentities": [
+        "CHUNK:112:1001",
+        "CHUNK:113:1002"
+      ],
+      "k": 5
+    },
+    {
+      "id": "gold-expired-exclude",
+      "query": "过期制度还能否引用",
+      "relevantIdentities": [
+        "CHUNK:114:1101"
+      ],
+      "k": 5
+    },
+    {
+      "id": "gold-tombstone-exclude",
+      "query": "已下线文档还能否召回",
+      "relevantIdentities": [
+        "CHUNK:115:1201"
+      ],
+      "k": 5
+    }
   ]
 }

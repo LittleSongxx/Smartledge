@@ -7,7 +7,9 @@
 -- 用法（只读，人工确认后再并入金标）：
 --   1. 运维在 MySQL 执行本查询，导出 JSON（DBeaver/mysql -e + jq 均可）；
 --   2. 人工逐条确认：问题是否该命中当前知识库、期望应命中的文档/章节；
---   3. 按 rag-gold.v1.json 的 case 结构补写 question 与期望 identity 集合，
+--   3. 按 rag-gold.v1.json 的 case 结构补写 question 与期望 identity 集合；
+--      注意：空范围断言必须显式 "caseType": "EMPTY_SCOPE"，RANKING case 的
+--      relevantIdentities 留空会在装载期被拒绝（不再隐式解释为空范围），
 --      并入 resources/eval/rag-gold.v1.json（人工确认前绝不直接机灌）。
 --  说明：identity 用合成引用键（与现有金标一致），不是索引行 id。
 --

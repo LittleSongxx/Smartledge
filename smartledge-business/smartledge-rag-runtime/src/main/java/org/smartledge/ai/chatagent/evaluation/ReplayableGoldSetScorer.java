@@ -16,6 +16,9 @@ import java.util.function.Function;
  * Default {@code rag-gold.v1} identities are synthetic scorer keys, not live index IDs.
  * Live probe or archive lists must enter through {@link GoldReplayDump} or {@link GoldReplaySupport}.
  * Offline faithfulness lives in {@code rag_tools.eval.offline_faithfulness} and never writes [n].
+ *
+ * <p>两个打分不变量：重复 identity 只按首次出现位次计一次（nDCG 恒 ≤ 1）；
+ * 空 relevantIdentities 必须显式标记 {@code caseType=EMPTY_SCOPE}，否则装载期拒绝。</p>
  */
 public final class ReplayableGoldSetScorer {
 
@@ -44,7 +47,30 @@ public final class ReplayableGoldSetScorer {
         if (!"rag-gold.v1".equals(set.schemaVersion())) {
             throw new IllegalArgumentException("unsupported gold schema: " + set.schemaVersion());
         }
+        validate(set);
         return set;
+    }
+
+    /**
+     * 金标语义显式化：relevantIdentities 为空不再同时表示"空范围断言"与"尚未标注"。
+     * RANKING case 必须带非空相关集；EMPTY_SCOPE case 必须为空。拒绝在装载期完成。
+     */
+    private void validate(ReplayableGoldSet set) {
+        for (ReplayableGoldSet.GoldCase goldCase : set.cases()) {
+            boolean relevantEmpty = goldCase.relevantIdentities().isEmpty();
+            if (goldCase.isEmptyScope()) {
+                if (!relevantEmpty) {
+                    throw new IllegalArgumentException("EMPTY_SCOPE 金标 case 不能携带 relevantIdentities: "
+                        + goldCase.id() + "（空范围断言的期望就是零检索；有相关块请改用 RANKING）");
+                }
+                continue;
+            }
+            if (relevantEmpty) {
+                throw new IllegalArgumentException("金标 case 缺少 relevantIdentities 且未标记 caseType=EMPTY_SCOPE: "
+                    + goldCase.id() + "（若该问题本就应检索不到内容，请显式加 \"caseType\": \"EMPTY_SCOPE\"；"
+                    + "留空不再被解释为空范围断言）");
+            }
+        }
     }
 
     public GoldReplayDump loadReplay(InputStream input) throws IOException {
@@ -58,6 +84,7 @@ public final class ReplayableGoldSetScorer {
     public List<GoldScore> score(ReplayableGoldSet set, Function<ReplayableGoldSet.GoldCase, List<String>> retriever) {
         Objects.requireNonNull(set, "set");
         Objects.requireNonNull(retriever, "retriever");
+        validate(set);
         List<GoldScore> scores = new ArrayList<>();
         for (ReplayableGoldSet.GoldCase goldCase : set.cases()) {
             List<String> retrieved = retriever.apply(goldCase);
@@ -127,8 +154,11 @@ public final class ReplayableGoldSetScorer {
 
     public GoldScore scoreCase(ReplayableGoldSet.GoldCase goldCase, List<String> retrievedIdentities) {
         List<String> relevant = goldCase.relevantIdentities();
+        // 排序指标只认唯一 identity 的首次出现位次：重复项既不应重复贡献 DCG（会突破 nDCG≤1），
+        // 也不应挤占窗口。上游引擎虽已按 uniqueKey 去重，打分器必须自守而不是依赖上游纪律。
         List<String> retrieved = retrievedIdentities == null ? List.of() : retrievedIdentities.stream()
             .filter(Objects::nonNull)
+            .distinct()
             .toList();
         if (relevant.isEmpty()) {
             boolean empty = retrieved.isEmpty();

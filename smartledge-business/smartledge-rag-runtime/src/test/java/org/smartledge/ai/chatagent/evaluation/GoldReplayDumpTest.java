@@ -82,6 +82,7 @@ class GoldReplayDumpTest {
             "gold-leave-window",
             "请假需要提前多久申请",
             List.of("CHUNK:101:201"),
+            ReplayableGoldSet.GoldCase.CASE_TYPE_RANKING,
             5
         );
         ReplayableGoldSetScorer.GoldScore score = scorer.scoreCase(goldCase, GoldReplaySupport.sourceIdentities(probe));
