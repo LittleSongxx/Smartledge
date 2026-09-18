@@ -19,9 +19,13 @@
 </p>
 
 <p align="center">
+  在线体验
+  ·
   <a href="https://smartledge.cn/login">用户端</a>
   ·
   <a href="https://smartledge.cn/admin/login">管理端</a>
+  <br/>
+  登录页自带作品集试用账号（只读）
 </p>
 
 <p align="center">
