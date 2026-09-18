@@ -50,6 +50,9 @@ services:
       - ../sql/表数据/Mysql/S23-补修S22漏掉的乱码列.sql:/docker-entrypoint-initdb.d/10-fix-mojibake-more.sql:ro
       - ./mysql-client-charset.cnf:/etc/mysql/conf.d/zz-client-charset.cnf:ro
       - smartledge-mysql-data:/var/lib/mysql
+      # 生产（有独立数据盘时）改用绑定挂载，将 MySQL 数据放到数据盘，避免系统盘被构建产物撑爆：
+      #   - /data/mysql-data:/var/lib/mysql
+      # 见 records/RT12 §5：30 份文档入库把 22G 卷写满系统盘触发 ES flood-stage。
     mem_limit: 1g
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${SMARTLEDGE_MYSQL_PASSWORD:-smartledge}"]
