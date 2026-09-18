@@ -176,7 +176,6 @@
           class="hidden min-w-0 truncate rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-caption text-amber-950 sm:block"
           data-testid="portfolio-readonly-banner"
         >试用账号只读展示：菜单与页面均可查看，增删改已关闭</p>
-        <ProjectGuideLink label="如何学习" class="ml-auto flex-none" />
       </header>
 
       <!--
@@ -214,7 +213,6 @@ import {
   UsersIcon
 } from '@heroicons/vue/24/outline'
 import IcpFooter from '../../components/IcpFooter.vue'
-import ProjectGuideLink from '../../components/system/ProjectGuideLink.vue'
 import { Button } from '@/components/ui/button'
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/drawer'
 import { cn } from '@/lib/utils'

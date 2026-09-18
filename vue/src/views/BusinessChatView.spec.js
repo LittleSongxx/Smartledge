@@ -284,6 +284,7 @@ describe('B1 管理后台入口按能力开放', () => {
     expect(wrapper.find(ENTRY).exists()).toBe(false)
     // 退出入口不受影响。
     expect(wrapper.find('[title="退出登录"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('如何学习')
   })
 
   it('fails closed when the token carries no permission claim at all', async () => {

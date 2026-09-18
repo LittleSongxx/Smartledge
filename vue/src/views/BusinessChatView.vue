@@ -13,7 +13,6 @@ import {
 } from '@heroicons/vue/24/outline'
 import Chat from '../components/Chat.vue'
 import ConversationNavigation from '@/components/chat/ConversationNavigation.vue'
-import ProjectGuideLink from '@/components/system/ProjectGuideLink.vue'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Textarea } from '@/components/ui/textarea'
@@ -742,7 +741,6 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="flex flex-none items-center gap-1 sm:gap-2">
-          <ProjectGuideLink label="如何学习" />
           <!--
             按能力开放的跨端入口：持有 console:access 的成员（管理角色）才看得到管理端。
             两端各自登录：这里落到的是管理端自己的登录页（已登录则被守卫直接送到运营总览）。

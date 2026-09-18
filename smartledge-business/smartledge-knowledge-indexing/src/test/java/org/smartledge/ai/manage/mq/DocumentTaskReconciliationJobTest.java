@@ -18,6 +18,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
@@ -58,6 +60,8 @@ class DocumentTaskReconciliationJobTest {
 
     private DocumentTaskReconciliationJob job;
 
+    private DocumentMessagingProperties properties;
+
     @BeforeAll
     static void initMybatisMetadata() {
         MybatisLambdaCacheTestSupport.initialize(SuperAgentDocumentTask.class, SuperAgentDocument.class);
@@ -65,7 +69,7 @@ class DocumentTaskReconciliationJobTest {
 
     @BeforeEach
     void setUp() {
-        DocumentMessagingProperties properties = new DocumentMessagingProperties();
+        properties = new DocumentMessagingProperties();
         DocumentMessagingProperties.Reconcile reconcile = new DocumentMessagingProperties.Reconcile();
         reconcile.setBatchSize(10);
         reconcile.setMaxRedispatchAttempts(3);
@@ -132,6 +136,46 @@ class DocumentTaskReconciliationJobTest {
         verify(messagePublisher, never()).publishIndexBuild(any());
         verify(taskMapper, times(1)).update(any(), any());
         verify(taskLogService, times(1)).saveLog(anyLong(), anyLong(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("开工已久但 GraphRAG checkpoint 仍新鲜的任务不得判失联")
+    void runningTaskWithFreshGraphRagCheckpointIsNotStale() {
+        properties.getReconcile().setStaleTaskTimeoutMillis(120_000L);
+        SuperAgentDocumentTask task = indexBuildTask(DocumentTaskStatusEnum.RUNNING.getCode(), 0);
+        task.setStartTime(new Date(System.currentTimeMillis() - 3 * 3600_000L));
+        task.setExtJson("{\"graphRagBuild\":{\"status\":\"RUNNING\",\"stage\":\"EXTRACTING\","
+            + "\"lastCheckpointTime\":\""
+            + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+            + "\"}}");
+        stubStaleQuery(task);
+
+        job.reconcile();
+
+        verify(taskMapper, never()).update(any(), any());
+        verify(taskLogService, never()).saveLog(anyLong(), anyLong(), any(), any(), any(), any(), any(), any(), any());
+        verify(messagePublisher, never()).publishIndexBuild(any());
+    }
+
+    @Test
+    @DisplayName("GraphRAG checkpoint 已超过静默窗口时仍判失联")
+    void runningTaskWithStaleGraphRagCheckpointIsMarkedFailed() {
+        SuperAgentDocument document = new SuperAgentDocument();
+        document.setId(2001L);
+        SuperAgentDocumentTask task = indexBuildTask(DocumentTaskStatusEnum.RUNNING.getCode(), 0);
+        task.setStartTime(new Date(System.currentTimeMillis() - 3 * 3600_000L));
+        task.setExtJson("{\"graphRagBuild\":{\"status\":\"RUNNING\",\"stage\":\"EXTRACTING\","
+            + "\"lastCheckpointTime\":\""
+            + LocalDateTime.now().minusHours(3).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+            + "\"}}");
+        stubStaleQuery(task);
+        when(documentMapper.selectById(2001L)).thenReturn(document);
+
+        job.reconcile();
+
+        verify(taskMapper, times(1)).update(any(), any());
+        verify(taskLogService, times(1)).saveLog(anyLong(), anyLong(), any(), any(), any(), any(), any(), any(), any());
+        verify(messagePublisher, never()).publishIndexBuild(any());
     }
 
     @Test

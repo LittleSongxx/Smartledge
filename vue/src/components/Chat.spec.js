@@ -68,6 +68,37 @@ describe('Chat answer rendering', () => {
     expect(document.body.textContent).toContain('免责声明')
   })
 
+  it('keeps answer sources on one line until the visitor expands them', async () => {
+    const wrapper = mountChat({
+      id: 'assistant-sources',
+      role: 'assistant',
+      content: '结论见 [1]。',
+      references: [
+        { referenceId: '1', citationIdentity: 'CHUNK:1', citationEvidenceType: 'CHUNK', documentName: 'GPIO 手册', quoteText: 'hb_gpioinfo' },
+        { referenceId: '2', citationIdentity: 'KG:2', citationEvidenceType: 'KG_QUOTE_SOURCE', documentName: '按键示例', quoteText: 'button_led.py' },
+        { referenceId: '4', citationIdentity: 'SUM:4', citationEvidenceType: 'SUMMARY', documentName: '中断摘要', quoteText: '上升沿' }
+      ],
+      recommendations: []
+    })
+
+    const expandButton = wrapper.find('[aria-label="展开回答来源"]')
+    expect(expandButton.exists()).toBe(true)
+    expect(expandButton.attributes('aria-expanded')).toBe('false')
+    expect(expandButton.text()).toContain('另 2 条')
+    expect(wrapper.text()).toContain('[1] GPIO 手册')
+    expect(wrapper.text()).not.toContain('[2] 按键示例')
+    expect(wrapper.text()).not.toContain('[4] 中断摘要')
+
+    await wrapper.find('.citation-token').trigger('click')
+    await nextTick()
+    expect(document.body.textContent).toContain('来源 [1] · GPIO 手册')
+
+    await expandButton.trigger('click')
+    expect(wrapper.find('[aria-label="收起回答来源"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('[2] 按键示例')
+    expect(wrapper.text()).toContain('[4] 中断摘要')
+  })
+
   it('keeps failure recovery in the answer context', async () => {
     const wrapper = mountChat({
       id: 'assistant-2',

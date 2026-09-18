@@ -11,6 +11,7 @@ import org.smartledge.ai.manage.mapper.SuperAgentDocumentTaskMapper;
 import org.smartledge.ai.manage.mq.message.DocumentIndexBuildMessage;
 import org.smartledge.ai.manage.mq.message.DocumentParseRouteMessage;
 import org.smartledge.ai.manage.service.DocumentTaskLogService;
+import org.smartledge.ai.manage.support.RunningTaskHeartbeatPolicy;
 import org.smartledge.enums.DocumentIndexStatusEnum;
 import org.smartledge.enums.DocumentLogLevelEnum;
 import org.smartledge.enums.DocumentOperatorTypeEnum;
@@ -143,11 +144,14 @@ public class DocumentTaskReconciliationJob {
     /**
      * 判定失联的 RUNNING 任务。
      *
-     * <p>没有本步骤时，停止或失败路径留下的 RUNNING 任务会让 {@code buildIndex} 永久拒绝重建。</p>
+     * <p>没有本步骤时，停止或失败路径留下的 RUNNING 任务会让 {@code buildIndex} 永久拒绝重建。
+     * 查询仍用 startTime 找出开工已久的任务；若 GraphRAG 检查点还在静默窗口内，视为仍存活。</p>
      */
     private int failStaleRunningTasks(DocumentMessagingProperties.Reconcile config) {
 
-        Date startedBefore = new Date(System.currentTimeMillis() - config.getStaleTaskTimeoutMillis());
+        long nowMillis = System.currentTimeMillis();
+        long staleTimeoutMillis = config.getStaleTaskTimeoutMillis() == null ? 0L : config.getStaleTaskTimeoutMillis();
+        Date startedBefore = new Date(nowMillis - staleTimeoutMillis);
         List<SuperAgentDocumentTask> candidates = taskMapper.selectList(new LambdaQueryWrapper<SuperAgentDocumentTask>()
             .eq(SuperAgentDocumentTask::getStatus, BusinessStatus.YES.getCode())
             .eq(SuperAgentDocumentTask::getTaskStatus, DocumentTaskStatusEnum.RUNNING.getCode())
@@ -160,6 +164,12 @@ public class DocumentTaskReconciliationJob {
 
         int count = 0;
         for (SuperAgentDocumentTask task : candidates) {
+            if (RunningTaskHeartbeatPolicy.hasRecentHeartbeat(task.getExtJson(), nowMillis, staleTimeoutMillis)) {
+                log.info("执行中任务仍有 GraphRAG checkpoint，跳过失联判定，documentId={}, taskId={}, startTime={}, lastCheckpointMillis={}",
+                    task.getDocumentId(), task.getId(), task.getStartTime(),
+                    RunningTaskHeartbeatPolicy.lastHeartbeatMillis(task.getExtJson()));
+                continue;
+            }
             log.error("任务长时间处于执行中，判定为失联并标记失败，documentId={}, taskId={}, startTime={}",
                 task.getDocumentId(), task.getId(), task.getStartTime());
             markTaskFailed(task, "TASK_STALE_TIMEOUT", "任务长时间未结束，已判定为失联并标记失败。");

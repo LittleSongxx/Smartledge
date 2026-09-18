@@ -79,7 +79,6 @@ function mountLayout() {
     global: {
       stubs: {
         IcpFooter: true,
-        ProjectGuideLink: true,
         Drawer: { template: '<div><slot /></div>' },
         DrawerContent: { template: '<div><slot /></div>' },
         DrawerHeader: { template: '<div><slot /></div>' },
@@ -148,6 +147,7 @@ describe('B1 管理端菜单按能力渲染', () => {
       .forEach((label) => expect(text, label).toContain(label))
     expect(text).toContain('作品集试用')
     expect(wrapper.get('[data-testid="portfolio-readonly-banner"]').text()).toContain('只读展示')
+    expect(text).not.toContain('如何学习')
   })
 
   it('offers the way back to the chat end from the console', async () => {

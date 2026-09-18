@@ -231,7 +231,7 @@ app:
         enabled: true
         interval-millis: 60000
         dispatch-grace-millis: 120000
-        # 失联判定窗口：任务卡死后由对账判失败并释放文档（默认 2 小时）。
+        # 失联静默窗口：无 GraphRAG checkpoint 时从 startTime 起算；有心跳则从最近检查点起算。
         stale-task-timeout-millis: 7200000
         batch-size: 200
         max-redispatch-attempts: 5

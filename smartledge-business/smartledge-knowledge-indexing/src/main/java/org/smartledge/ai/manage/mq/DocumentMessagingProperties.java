@@ -46,7 +46,11 @@ public class DocumentMessagingProperties {
         /** 任务创建后多久仍未被执行才判定为投递丢失并补投，单位毫秒。 */
         private Long dispatchGraceMillis = 120000L;
 
-        /** 任务进入 RUNNING 后多久仍未结束才判定为失联并标记失败，单位毫秒。 */
+        /**
+         * 失联静默窗口，单位毫秒。
+         * 有 {@code graphRagBuild.lastCheckpointTime} 时从最近心跳起算；
+         * 没有可解析心跳时从 {@code startTime} 起算。
+         */
         private Long staleTaskTimeoutMillis = 7200000L;
 
         /** 单次对账最多处理的任务数，避免一次性放大。 */

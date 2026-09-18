@@ -5,7 +5,7 @@
       <p class="m-0 text-caption text-muted-foreground">Smartledge</p>
       <h1 class="mt-2 text-title font-semibold">如何学习本项目</h1>
       <p class="mt-3 leading-7 text-muted-foreground">
-        这是仓库内的公开架构说明。会话端和管理端的「如何学习」都指向这里，不再跳到站外付费文。
+        这是仓库内的公开架构说明，不再跳到站外付费文。
       </p>
 
       <section class="mt-8">

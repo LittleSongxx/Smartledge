@@ -1,3 +1,7 @@
+<script>
+let sourcePanelSeq = 0
+</script>
+
 <script setup>
 import { computed, ref } from 'vue'
 import {
@@ -5,6 +9,7 @@ import {
   ArrowRightIcon,
   ArrowTopRightOnSquareIcon,
   BookOpenIcon,
+  ChevronDownIcon,
   CircleStackIcon
 } from '@heroicons/vue/24/outline'
 import { Button } from '@/components/ui/button'
@@ -22,6 +27,18 @@ const sources = computed(() => projectSourceReferences(props.references))
 const dialogOpen = ref(false)
 const detailKind = ref('source')
 const selectedIdentity = ref('')
+const sourcesExpanded = ref(false)
+const sourcePanelId = `answer-source-panel-${++sourcePanelSeq}`
+const canCollapse = computed(() => sources.value.length > 1 || Boolean(props.routeExplain && sources.value.length))
+const visibleSources = computed(() => {
+  if (sourcesExpanded.value || !canCollapse.value) return sources.value
+  return sources.value.slice(0, 1)
+})
+const collapseActionLabel = computed(() => {
+  const extra = sources.value.length - 1
+  return extra > 0 ? `另 ${extra} 条` : '展开'
+})
+const showRouteExplain = computed(() => Boolean(props.routeExplain && (sourcesExpanded.value || !sources.value.length)))
 
 const selectedPosition = computed(() => {
   return Math.max(0, sources.value.findIndex((source) => source.identity === selectedIdentity.value))
@@ -92,26 +109,48 @@ defineExpose({ openReference })
 
 <template>
   <section v-if="sources.length || routeExplain" class="mt-5 border-t border-border pt-4" aria-label="回答来源">
-    <div class="flex flex-wrap items-center gap-2">
-      <span class="mr-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+    <div
+      :id="sourcePanelId"
+      class="flex items-center gap-2"
+      :class="sourcesExpanded ? 'flex-wrap' : 'flex-nowrap'"
+    >
+      <span class="mr-1 flex shrink-0 items-center gap-1.5 text-xs font-medium text-muted-foreground">
         <BookOpenIcon class="size-4" aria-hidden="true" />
         回答来源
       </span>
       <Button
-        v-for="source in sources"
+        v-for="source in visibleSources"
         :key="source.identity"
         variant="outline"
         size="sm"
         type="button"
-        class="min-h-11 rounded-md bg-[var(--citation-bg)] text-[var(--citation-fg)] hover:bg-[var(--citation-bg)]/70 sm:min-h-8"
+        class="min-h-11 min-w-0 max-w-full shrink rounded-md bg-[var(--citation-bg)] text-[var(--citation-fg)] hover:bg-[var(--citation-bg)]/70 sm:min-h-8"
         :aria-label="`查看来源 ${source.index}：${source.title}`"
         @click="openReference(source.index)"
       >
         [{{ source.index }}] {{ source.title }}
       </Button>
-      <Button v-if="routeExplain" variant="ghost" size="sm" type="button" class="min-h-11 rounded-md sm:min-h-8" @click="openRouteExplain">
+      <Button v-if="showRouteExplain" variant="ghost" size="sm" type="button" class="min-h-11 shrink-0 rounded-md sm:min-h-8" @click="openRouteExplain">
         <CircleStackIcon data-icon="inline-start" />
         检索说明
+      </Button>
+      <Button
+        v-if="canCollapse"
+        variant="ghost"
+        size="sm"
+        type="button"
+        class="min-h-11 shrink-0 rounded-md sm:min-h-8"
+        :aria-expanded="sourcesExpanded"
+        :aria-controls="sourcePanelId"
+        :aria-label="sourcesExpanded ? '收起回答来源' : '展开回答来源'"
+        @click="sourcesExpanded = !sourcesExpanded"
+      >
+        {{ sourcesExpanded ? '收起' : collapseActionLabel }}
+        <ChevronDownIcon
+          data-icon="inline-end"
+          class="transition-transform duration-200"
+          :class="sourcesExpanded ? 'rotate-180' : ''"
+        />
       </Button>
     </div>
 
