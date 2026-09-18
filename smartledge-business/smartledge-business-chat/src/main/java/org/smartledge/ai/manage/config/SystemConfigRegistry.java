@@ -130,7 +130,7 @@ public class SystemConfigRegistry {
                 duration("graphRag.execution.retryBackoffMillis", "graphRagExecution", "GraphRAG 重试退避", "可恢复错误重试前的等待时间。", 0, 60000,
                         NEW_BUILD_TASK, o -> o.getGraphRagExecution().getRetryBackoffMillis(),
                         (o, v) -> o.getGraphRagExecution().setRetryBackoffMillis((Long) v)),
-                duration("graphRag.execution.documentBudgetMillis", "graphRagExecution", "GraphRAG 文档预算", "整篇文档 GraphRAG 抽取总时间预算。", 1, 3600000,
+                duration("graphRag.execution.documentBudgetMillis", "graphRagExecution", "GraphRAG 文档预算", "整篇文档 GraphRAG 抽取总时间预算。", 1, 14400000,
                         RESTART_REQUIRED, o -> o.getGraphRagExecution().getDocumentBudgetMillis(),
                         (o, v) -> o.getGraphRagExecution().setDocumentBudgetMillis((Long) v)),
                 duration("graphRag.execution.toolBudgetMillis", "graphRagExecution", "GraphRAG 工具预算", "单次 Python GraphRAG 工具调用时间预算。", 1, 300000,

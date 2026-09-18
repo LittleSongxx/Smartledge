@@ -1,7 +1,8 @@
 # 云端模型模式的依赖清单（无 torch / sentence-transformers）。
 #
 # 适用场景：CPU-only 服务器，或希望向量化与重排走云端 API 的部署。
-# 与 requirements.txt 的差异：去掉 sentence-transformers 与 tokenizers（仅本地推理需要）。
+# 与 requirements.txt 的差异：去掉 sentence-transformers（仅本地推理需要）。
+# RAPTOR 层次聚类仍要 scikit-learn（CPU，不含 torch）。漏装时文档超过簇上限会 500。
 #
 # 配套配置：
 #   Java 侧向量化 —— application.yaml 的 app.ai.embedding.provider=openai-compatible
@@ -19,3 +20,4 @@ alibabacloud-docmind-api20220711==1.4.14
 alibabacloud-credentials==1.0.9
 PyMuPDF==1.24.14
 Pillow==12.2.0
+scikit-learn>=1.5.0

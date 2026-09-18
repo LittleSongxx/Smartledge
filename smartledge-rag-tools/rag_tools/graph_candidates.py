@@ -110,6 +110,10 @@ def serial(value):
 # 因此它不进来源预算（见 prompt_tokens），而是整份计入 contextTokens 余量（见 fits），
 # 并在 plan 的 inference 里单独可见（responseFormatTokensEstimate）。
 RESPONSE_FORMAT_TOKENS_ESTIMATE = len(_tokenizer.encode(serial(CANDIDATE_RESPONSE_FORMAT)).ids)
+# 计划段数/批次数与 batchChunkLimit 解耦，并与 Java maxBatches 上限 4096 对齐。
+# 旧公式 1024 * batchChunkLimit 在默认 1 段/批时会把百页手册直接打成资源上限。
+MAX_PLAN_SEGMENTS = 4096
+MAX_PLAN_BATCHES = 4096
 
 
 def fail(reason, status=422, **diagnostics):
@@ -227,7 +231,7 @@ def handle(request: GraphExtractRequest) -> GraphExtractResponse:
                     end = start + (end - start) // 2
                 segments.append(segment)
                 start = end
-                if len(segments) > 1024 * request.options["batchChunkLimit"]:
+                if len(segments) > MAX_PLAN_SEGMENTS:
                     fail("GRAPH_DOCUMENT_RESOURCE_LIMIT")
         current = []
         for segment in segments:
@@ -241,7 +245,7 @@ def handle(request: GraphExtractRequest) -> GraphExtractResponse:
             current.append(segment)
         if current:
             batches.append(batch(current, len(batches), prompt, public))
-        if len(batches) > 1024 or time.monotonic() >= tool_deadline:
+        if len(batches) > MAX_PLAN_BATCHES or time.monotonic() >= tool_deadline:
             fail("GRAPH_PLAN_RESOURCE_LIMIT")
         plan_id = digest(request.input_fingerprint + fingerprint + serial(batches))
         return GraphExtractResponse(metadata={"schemaVersion": VERSION, "operation": "plan",

@@ -27,6 +27,10 @@ DEFAULT_DASHSCOPE_RERANK_URL = "https://dashscope.aliyuncs.com/api/v1/services/r
 DEFAULT_RERANK_MAX_ATTEMPTS = 3
 DEFAULT_RERANK_BACKOFF_SECONDS = 0.8
 DEFAULT_RERANK_MAX_CONCURRENCY = 4
+# 百炼兼容 embeddings 多数模型单次 input 不超过 10；gte-rerank 的 documents 不超过 20。
+# 超限会 400 InvalidParameter（batch size），/raptor/build 会整篇 503。
+DEFAULT_CLOUD_EMBED_BATCH_SIZE = 10
+DEFAULT_CLOUD_RERANK_BATCH_SIZE = 20
 # 可重试的 HTTP 状态：限流与瞬时服务端错误；4xx 里的参数/鉴权错误重试无意义。
 RETRYABLE_STATUS = {408, 425, 429, 500, 502, 503, 504}
 
@@ -87,6 +91,12 @@ def _dashscope_rerank_scores(query: str, texts: list[str]) -> list[float]:
         raise SemanticModelUnavailable(
             "重排 provider=dashscope 需要 API Key：请配置 ALI_BAI_LIAN_API_KEY 或 RAG_TOOLS_RERANK_DASHSCOPE_API_KEY。"
         )
+    batch_size = _cloud_rerank_batch_size()
+    if len(texts) > batch_size:
+        scores: list[float] = []
+        for start in range(0, len(texts), batch_size):
+            scores.extend(_dashscope_rerank_scores(query, texts[start:start + batch_size]))
+        return scores
     payload = {
         "model": _dashscope_rerank_model(),
         "input": {"query": query or "", "documents": [text or "" for text in texts]},
@@ -99,7 +109,7 @@ def _dashscope_rerank_scores(query: str, texts: list[str]) -> list[float]:
     with _rerank_concurrency_slot():
         for attempt in range(1, attempts + 1):
             try:
-                body = _post_json(url, payload, api_key, _dashscope_timeout())
+                body = _post_json(url, payload, api_key, _dashscope_timeout(), "云端重排")
                 return _scores_from_rerank_body(body, len(texts))
             except SemanticModelUnavailable as failure:
                 raise
@@ -123,7 +133,7 @@ class _RetryableCloudError(RuntimeError):
     """可重试的云端错误（限流、瞬时服务端错误、网络抖动）。"""
 
 
-def _post_json(url: str, payload: dict, api_key: str, timeout: float) -> dict:
+def _post_json(url: str, payload: dict, api_key: str, timeout: float, purpose: str = "云端请求") -> dict:
     request = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
@@ -142,7 +152,7 @@ def _post_json(url: str, payload: dict, api_key: str, timeout: float) -> dict:
         message = f"HTTP {exception.code} {detail}"
         if exception.code in RETRYABLE_STATUS:
             raise _RetryableCloudError(message) from exception
-        raise SemanticModelUnavailable(f"云端重排请求被拒绝: {message}") from exception
+        raise SemanticModelUnavailable(f"{purpose}请求被拒绝: {message}") from exception
     except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exception:
         raise _RetryableCloudError(str(exception)) from exception
 
@@ -202,6 +212,12 @@ def _openai_compatible_embeddings(texts: list[str]) -> list[list[float]]:
             "embedding provider=openai-compatible 需要 API Key：请配置 "
             "SMARTLEDGE_EMBEDDING_API_KEY 或 ALI_BAI_LIAN_API_KEY。"
         )
+    batch_size = _cloud_embed_batch_size()
+    if len(texts) > batch_size:
+        vectors: list[list[float]] = []
+        for start in range(0, len(texts), batch_size):
+            vectors.extend(_openai_compatible_embeddings(texts[start:start + batch_size]))
+        return vectors
     url = _embedding_url()
     payload = {"model": _embedding_model_name(), "input": [text or "" for text in texts]}
     dimensions = _embedding_dimensions()
@@ -213,7 +229,7 @@ def _openai_compatible_embeddings(texts: list[str]) -> list[list[float]]:
     with _rerank_concurrency_slot():
         for attempt in range(1, attempts + 1):
             try:
-                body = _post_json(url, payload, api_key, _dashscope_timeout())
+                body = _post_json(url, payload, api_key, _dashscope_timeout(), "云端向量化")
                 return _vectors_from_embedding_body(body, len(texts), dimensions)
             except SemanticModelUnavailable:
                 raise
@@ -400,6 +416,26 @@ def _rerank_max_attempts() -> int:
 def _rerank_backoff() -> float:
     return config_float("ragTools.rerank.backoffSeconds", "RAG_TOOLS_RERANK_BACKOFF_SECONDS",
                         DEFAULT_RERANK_BACKOFF_SECONDS)
+
+
+def _cloud_embed_batch_size() -> int:
+    return config_int(
+        "ragTools.embedding.batchSize",
+        "RAG_TOOLS_EMBEDDING_BATCH_SIZE",
+        DEFAULT_CLOUD_EMBED_BATCH_SIZE,
+        1,
+        20,
+    )
+
+
+def _cloud_rerank_batch_size() -> int:
+    return config_int(
+        "ragTools.rerank.batchSize",
+        "RAG_TOOLS_RERANK_BATCH_SIZE",
+        DEFAULT_CLOUD_RERANK_BATCH_SIZE,
+        1,
+        20,
+    )
 
 
 def _rerank_concurrency_slot():

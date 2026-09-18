@@ -70,6 +70,16 @@ class GraphExtractTest(unittest.TestCase):
         self.assertEqual(result.metadata['status'], 'completed')
         self.assertEqual(result.metadata['extractionOutcome'], 'ALL_CANDIDATES_REJECTED')
 
+    def test_plan_keeps_more_segments_than_old_batch_multiplier(self):
+        request = self.request(['字'] * 1025)
+        request.options['batchChunkLimit'] = 1
+        request.budget_millis = 120000
+        with patch('urllib.request.urlopen', side_effect=AssertionError('plan must not call model')):
+            plan = extract_graph(request).metadata
+        segment_count = sum(len(batch['segments']) for batch in plan['batches'])
+        self.assertEqual(1025, segment_count)
+        self.assertGreater(len(plan['batches']), 1024)
+
     def test_thematic_break_batch_completes_without_model_call(self):
         request = self.request(['---'])
         request.chunks[0].chunk_type = 'THEMATIC_BREAK'

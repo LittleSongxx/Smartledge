@@ -75,6 +75,22 @@ class CloudRerankTest(unittest.TestCase):
             self.assertEqual([], score_rerank_pairs("查询", []))
         post.assert_not_called()
 
+    def test_cloud_rerank_splits_over_provider_batch_limit(self) -> None:
+        calls = []
+
+        def one_batch(_url, payload, *_args, **_kwargs):
+            documents = payload["input"]["documents"]
+            calls.append(len(documents))
+            self.assertLessEqual(len(documents), semantic_model.DEFAULT_CLOUD_RERANK_BATCH_SIZE)
+            return {"output": {"results": [
+                {"index": index, "relevance_score": 0.1} for index in range(len(documents))
+            ]}}
+
+        with mock.patch.object(semantic_model, "_post_json", side_effect=one_batch):
+            scores = score_rerank_pairs("查询", [f"段{index}" for index in range(45)])
+        self.assertEqual(45, len(scores))
+        self.assertEqual([20, 20, 5], calls)
+
     def test_local_provider_still_uses_cross_encoder(self) -> None:
         with mock.patch.dict("os.environ", {"RAG_TOOLS_RERANK_PROVIDER": "local"}, clear=False):
             with mock.patch.object(semantic_model, "_score_pairs", return_value=[0.2, 0.8]) as local:

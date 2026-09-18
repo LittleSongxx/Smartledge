@@ -45,7 +45,7 @@ docker exec smartledge-mysql mysql -uroot -p"$SMARTLEDGE_MYSQL_PASSWORD" -e \
 ## 4. Python 算法服务
 
 默认云端模式：向量化与重排走云端 API，因此**不需要本地模型**（省约 5GB 依赖与 4-6GB 常驻内存），
-依赖清单用 `requirements-cloud.txt`。需要 Python 3.11 与 `uv`：
+依赖清单用 `requirements-cloud.txt`（含 RAPTOR 聚类所需的 scikit-learn，不含 torch）。需要 Python 3.11 与 `uv`：
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh

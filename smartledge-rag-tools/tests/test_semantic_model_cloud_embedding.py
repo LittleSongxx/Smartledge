@@ -68,6 +68,20 @@ class CloudEmbeddingTest(unittest.TestCase):
             self.assertEqual([], embed_texts([]))
         post.assert_not_called()
 
+    def test_cloud_embedding_splits_over_provider_batch_limit(self) -> None:
+        calls = []
+
+        def one_batch(_url, payload, *_args, **_kwargs):
+            texts = payload["input"]
+            calls.append(len(texts))
+            self.assertLessEqual(len(texts), semantic_model.DEFAULT_CLOUD_EMBED_BATCH_SIZE)
+            return {"data": [{"index": index, "embedding": [1.0, 0.0, 0.0, 0.0]} for index in range(len(texts))]}
+
+        with mock.patch.object(semantic_model, "_post_json", side_effect=one_batch):
+            vectors = embed_texts([f"段{index}" for index in range(25)])
+        self.assertEqual(25, len(vectors))
+        self.assertEqual([10, 10, 5], calls)
+
     def test_local_provider_still_uses_sentence_transformer(self) -> None:
         with mock.patch.dict("os.environ", {"SMARTLEDGE_EMBEDDING_PROVIDER": "local"}, clear=False):
             fake = mock.Mock()

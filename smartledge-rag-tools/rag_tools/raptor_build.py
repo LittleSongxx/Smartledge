@@ -200,7 +200,13 @@ def _cluster_items(items: list[_TreeItem], max_cluster_size: int) -> _ClusterRes
         )
 
     similarity_matrix = _similarity_matrix(vectors)
-    clusters = _sklearn_agglomerative_clusters(vectors, max_cluster_size)
+    try:
+        clusters = _sklearn_agglomerative_clusters(vectors, max_cluster_size)
+    except ImportError as exception:
+        raise HTTPException(
+            status_code=503,
+            detail="RAPTOR 聚类缺少 numpy/scikit-learn。云端模式请安装 requirements-cloud.txt 中的 scikit-learn。",
+        ) from exception
     clusters = _merge_singletons(clusters, similarity_matrix, max_cluster_size, items)
     clusters = [sorted(cluster, key=lambda index: _first_chunk_id(items[index])) for cluster in clusters]
     clusters.sort(key=lambda cluster: _first_chunk_id(items[cluster[0]]) if cluster else 0)

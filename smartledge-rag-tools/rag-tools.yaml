@@ -38,6 +38,8 @@ ragTools:
     maxConcurrency: "${RAG_TOOLS_RERANK_MAX_CONCURRENCY:4}"
     maxAttempts: "${RAG_TOOLS_RERANK_MAX_ATTEMPTS:3}"
     backoffSeconds: "${RAG_TOOLS_RERANK_BACKOFF_SECONDS:0.8}"
+    # 单次 documents 条数；gte-rerank 超过 20 会 400。
+    batchSize: "${RAG_TOOLS_RERANK_BATCH_SIZE:20}"
     dashscope:
       model: "${RAG_TOOLS_RERANK_DASHSCOPE_MODEL:gte-rerank-v2}"
       url: "${RAG_TOOLS_RERANK_DASHSCOPE_URL:https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank}"

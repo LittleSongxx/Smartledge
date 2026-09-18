@@ -80,7 +80,7 @@ public class GraphRagExecutionProperties {
         if (workerThreads < 1 || workerThreads > 64 || queueCapacity < 1 || queueCapacity > 4096
                 || documentConcurrency < 1 || documentConcurrency > workerThreads || maxBatchAttempts < 1
                 || maxBatchAttempts > 10 || retryBackoffMillis < 0 || retryBackoffMillis > 60000
-                || documentBudgetMillis < 1 || documentBudgetMillis > 3600000
+                || documentBudgetMillis < 1 || documentBudgetMillis > 14400000
                 || toolBudgetMillis < 1 || toolBudgetMillis > 300000
                 || reserveMillis < 1 || reserveMillis > 120000
                 || documentBudgetMillis <= reserveMillis
