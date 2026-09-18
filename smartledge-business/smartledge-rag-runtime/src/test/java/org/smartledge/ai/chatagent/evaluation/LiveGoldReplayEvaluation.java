@@ -152,6 +152,15 @@ class LiveGoldReplayEvaluation {
         if (!rerankEnabled) {
             body.putObject("overrides").put("rerankEnabled", false);
         }
+        String overridesJson = optionalProperty("live.eval.overrides", null);
+        if (overridesJson != null && !overridesJson.isBlank()) {
+            JsonNode extra = MAPPER.readTree(overridesJson);
+            if (!extra.isObject()) {
+                throw new IllegalArgumentException("-Dlive.eval.overrides 必须是 JSON 对象，如 '{\"enabledChannels\":[\"vector\",\"keyword\"]}'");
+            }
+            ObjectNode overrides = body.has("overrides") ? (ObjectNode) body.get("overrides") : body.putObject("overrides");
+            extra.fields().forEachRemaining(entry -> overrides.set(entry.getKey(), entry.getValue()));
+        }
         JsonNode data = post(baseUrl + "/manage/evaluation/retrieval/probe", token, body);
         List<String> identities = new ArrayList<>();
         for (JsonNode subQuestion : data.path("subQuestions")) {
@@ -165,20 +174,28 @@ class LiveGoldReplayEvaluation {
     }
 
     private JsonNode post(String url, String token, ObjectNode body) throws IOException, InterruptedException {
-        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(url))
-            .timeout(Duration.ofSeconds(120))
-            .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(MAPPER.writeValueAsString(body), StandardCharsets.UTF_8));
-        if (token != null) {
-            request.header("Authorization", "Bearer " + token);
+        // 探针限频是固定窗口；压线时单次 12s 退避重试，避免整轮因偶发限流失败。
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(url))
+                .timeout(Duration.ofSeconds(120))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(MAPPER.writeValueAsString(body), StandardCharsets.UTF_8));
+            if (token != null) {
+                request.header("Authorization", "Bearer " + token);
+            }
+            HttpResponse<String> response = http.send(request.build(), HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 429 && attempt == 1) {
+                Thread.sleep(12_000L);
+                continue;
+            }
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw new IllegalStateException("HTTP " + response.statusCode() + " from " + url + " body=" + clip(response.body()));
+            }
+            JsonNode root = MAPPER.readTree(response.body());
+            JsonNode data = root.path("data");
+            return data.isMissingNode() ? root : data;
         }
-        HttpResponse<String> response = http.send(request.build(), HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw new IllegalStateException("HTTP " + response.statusCode() + " from " + url + " body=" + clip(response.body()));
-        }
-        JsonNode root = MAPPER.readTree(response.body());
-        JsonNode data = root.path("data");
-        return data.isMissingNode() ? root : data;
+        throw new IllegalStateException("rate limited twice by " + url);
     }
 
     // ---------- 装配 ----------

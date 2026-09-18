@@ -1,6 +1,6 @@
 {
   "schemaVersion": "rag-gold.v1",
-  "description": "Live-corpus gold set for the public KB 2526644082445484032 (开源开发文档), snapshot 2026-09-18, current index tasks only (1165 chunks, 6 substantive docs; rdk_doc/MotionSDK are Apache/MIT license texts and intentionally carry no questions but remain retrievable distractors). Annotation rules: relevance judged by READING source chunk text only, never from retrieval output (anti-circular); relevant = the chunk containing the answer-bearing fact; k=6 matches ragRuntime.finalTopK; gold granularity is CHUNK-level — the live runner normalizes returned PARENT identities to their child chunks and KG_QUOTE evidence to its chunk via rag-gold.live-embodied.v1.index.json (same span counts once). empty-scope cases are explicitly typed and scored by emptyScopeCorrectness only. [v1.1 2026-09-18: after the v1.0 main round, a source-side completeness review (reading corpus text only, never retrieval output) added one equally answer-bearing chunk to each of hw-interface-list / imu-read-raw / imu-device-names / can-bitrate-cmd / gpio-hbgpioinfo; v1.0 baseline numbers in records remain reproducible against git history.]",
+  "description": "Live-corpus gold set for the public KB 2526644082445484032 (开源开发文档), snapshot 2026-09-18, current index tasks only (1165 chunks, 6 substantive docs; rdk_doc/MotionSDK are Apache/MIT license texts and intentionally carry no questions but remain retrievable distractors). Annotation rules: relevance judged by READING source chunk text only, never from retrieval output (anti-circular); relevant = the chunk containing the answer-bearing fact; k=6 matches ragRuntime.finalTopK; gold granularity is CHUNK-level — the live runner normalizes returned PARENT identities to their child chunks and KG_QUOTE evidence to its chunk via rag-gold.live-embodied.v1.index.json (same span counts once). empty-scope cases are explicitly typed and scored by emptyScopeCorrectness only. [v1.1 2026-09-18: after the v1.0 main round, a source-side completeness review (reading corpus text only, never retrieval output) added one equally answer-bearing chunk to each of hw-interface-list / imu-read-raw / imu-device-names / can-bitrate-cmd / gpio-hbgpioinfo; v1.0 baseline numbers in records remain reproducible against git history.] [v1.2 2026-09-18: +18 source-verified ranking cases (48 ranking total) across all six substantive docs to widen topic coverage for the ablation matrix; IMU 量程/ODR topics verified absent from these public docs and intentionally not covered.] [v1.3 2026-09-19: +14 capability-stratified cases so every designed retrieval mechanism gets its home-turf questions: rel-* entity/relation (GraphRAG), tbl-* precise table-cell lookups (table channel), sum-* doc-level overview (RAPTOR summaries); stratum = id prefix. Stratified numbers are reported per-stratum; no case is selected or tuned based on observed retrieval output.]",
   "cases": [
     {
       "id": "gpio-interrupt-pins",
@@ -250,6 +250,265 @@
       "relevantIdentities": [
         "CHUNK:2526652878538519077:2527399996689627311",
         "CHUNK:2526652878538515263:2527399996689622969"
+      ],
+      "k": 6
+    },
+    {
+      "id": "gpio-input-demo",
+      "query": "simple_input.py 测试例程演示了什么功能",
+      "relevantIdentities": [
+        "CHUNK:2526652844178779132:2527399962329887756"
+      ],
+      "k": 6
+    },
+    {
+      "id": "gpio-pin-define-where",
+      "query": "40pin 的管脚配置与定义应该去哪里查",
+      "relevantIdentities": [
+        "CHUNK:2526652844178779132:2527399962329887719"
+      ],
+      "k": 6
+    },
+    {
+      "id": "gpio-warn-cleanup",
+      "query": "什么情况下会收到 GPIO 警告信息？什么时候需要 GPIO.cleanup",
+      "relevantIdentities": [
+        "CHUNK:2526652844178779132:2527399962329887679"
+      ],
+      "k": 6
+    },
+    {
+      "id": "gpio-import-lib",
+      "query": "怎么在 Python 里导入 GPIO 库开始编程",
+      "relevantIdentities": [
+        "CHUNK:2526652844178779132:2527399962329887666"
+      ],
+      "k": 6
+    },
+    {
+      "id": "hw-camera-22pin",
+      "query": "开发板的摄像头接口是什么规格？几路",
+      "relevantIdentities": [
+        "CHUNK:2526652878538519077:2527399996689627309"
+      ],
+      "k": 6
+    },
+    {
+      "id": "hw-rtc-battery",
+      "query": "RTC 电池接口对电池的电压和电流有什么要求",
+      "relevantIdentities": [
+        "CHUNK:2526652878538519077:2527399996689627319"
+      ],
+      "k": 6
+    },
+    {
+      "id": "hw-debug-port",
+      "query": "调试串口在开发板什么位置？是什么类型接口",
+      "relevantIdentities": [
+        "CHUNK:2526652878538519077:2527399996689627315"
+      ],
+      "k": 6
+    },
+    {
+      "id": "hw-module-install",
+      "query": "核心模组安装时需要注意什么？安装方法是什么",
+      "relevantIdentities": [
+        "CHUNK:2526652878538519077:2527399996689627329",
+        "CHUNK:2526652878538519077:2527399996689627327"
+      ],
+      "k": 6
+    },
+    {
+      "id": "hw-sd-card",
+      "query": "开发板支持 Micro SD 卡吗？建议多大容量",
+      "relevantIdentities": [
+        "CHUNK:2526652878538519077:2527399996689627439"
+      ],
+      "k": 6
+    },
+    {
+      "id": "can-linkshow",
+      "query": "怎么查看 can0 接口的配置信息",
+      "relevantIdentities": [
+        "CHUNK:2526652878538515263:2527399996689623019"
+      ],
+      "k": 6
+    },
+    {
+      "id": "imu-hw-connect",
+      "query": "ICM42688 模组怎么和 RDK 开发板连接",
+      "relevantIdentities": [
+        "CHUNK:2526652947257992542:2527400065409105022",
+        "CHUNK:2526652947257992542:2527400065409105023"
+      ],
+      "k": 6
+    },
+    {
+      "id": "imu-verify",
+      "query": "怎么确认 ICM42688 传感器工作正常",
+      "relevantIdentities": [
+        "CHUNK:2526652947257992542:2527400065409105056"
+      ],
+      "k": 6
+    },
+    {
+      "id": "lite-damping",
+      "query": "SDK 停止下发指令后机器人会进入什么状态",
+      "relevantIdentities": [
+        "CHUNK:2526652947257993948:2527400099768838244"
+      ],
+      "k": 6
+    },
+    {
+      "id": "lite-pos-control",
+      "query": "做纯位置控制时下发数据的格式示例是什么",
+      "relevantIdentities": [
+        "CHUNK:2526652947257993948:2527400099768838248"
+      ],
+      "k": 6
+    },
+    {
+      "id": "lite-callback",
+      "query": "RegisterCallBack 回调函数在什么时候被调用",
+      "relevantIdentities": [
+        "CHUNK:2526652947257993948:2527400099768838237"
+      ],
+      "k": 6
+    },
+    {
+      "id": "dl-buildroot-who",
+      "query": "Buildroot 系统适合什么用户使用",
+      "relevantIdentities": [
+        "CHUNK:2526652912898256819:2527400065409097994"
+      ],
+      "k": 6
+    },
+    {
+      "id": "dl-hw-materials",
+      "query": "原理图、规格书这些硬件设计资料去哪里下载",
+      "relevantIdentities": [
+        "CHUNK:2526652912898256819:2527400065409098006"
+      ],
+      "k": 6
+    },
+    {
+      "id": "dl-tros-what",
+      "query": "TogetheROS.Bot 是什么",
+      "relevantIdentities": [
+        "CHUNK:2526652912898256819:2527400065409098103"
+      ],
+      "k": 6
+    },
+    {
+      "id": "rel-gpio-tool-parts",
+      "query": "hb_gpioinfo 工具由哪两部分组成？各负责什么",
+      "relevantIdentities": [
+        "CHUNK:2526652844178779132:2527399962329887779"
+      ],
+      "k": 6
+    },
+    {
+      "id": "rel-imu-device-order",
+      "query": "iio:device1 和 iio:device2 的序号是固定的吗？应该以什么为准",
+      "relevantIdentities": [
+        "CHUNK:2526652947257992542:2527400065409105047"
+      ],
+      "k": 6
+    },
+    {
+      "id": "rel-wifi-antenna-no",
+      "query": "板载 Wi-Fi 天线是几号接口",
+      "relevantIdentities": [
+        "CHUNK:2526652878538519077:2527399996689627303"
+      ],
+      "k": 6
+    },
+    {
+      "id": "rel-usbhub-chip",
+      "query": "四路 USB 3.0 接口是通过什么芯片扩展的",
+      "relevantIdentities": [
+        "CHUNK:2526652878538519077:2527399996689627311"
+      ],
+      "k": 6
+    },
+    {
+      "id": "rel-audio-chip",
+      "query": "耳机音频接口基于什么芯片？支持什么功能",
+      "relevantIdentities": [
+        "CHUNK:2526652878538519077:2527399996689627311"
+      ],
+      "k": 6
+    },
+    {
+      "id": "rel-tcan4550",
+      "query": "TCAN4550 是什么芯片？用在开发板哪个接口",
+      "relevantIdentities": [
+        "CHUNK:2526652878538519077:2527399996689627311"
+      ],
+      "k": 6
+    },
+    {
+      "id": "tbl-flash-connector-no",
+      "query": "闪连接口是几号接口？是什么类型的接口",
+      "relevantIdentities": [
+        "CHUNK:2526652878538519077:2527399996689627302"
+      ],
+      "k": 6
+    },
+    {
+      "id": "tbl-tfcard-no",
+      "query": "TF 卡接口在开发板哪个面？是几号接口",
+      "relevantIdentities": [
+        "CHUNK:2526652878538519077:2527399996689627303"
+      ],
+      "k": 6
+    },
+    {
+      "id": "tbl-eth-no",
+      "query": "千兆以太网口是几号接口",
+      "relevantIdentities": [
+        "CHUNK:2526652878538519077:2527399996689627315",
+        "CHUNK:2526652878538519077:2527399996689627302"
+      ],
+      "k": 6
+    },
+    {
+      "id": "tbl-lcd-type",
+      "query": "LCD 显示接口是什么类型？是几号接口",
+      "relevantIdentities": [
+        "CHUNK:2526652878538519077:2527399996689627303"
+      ],
+      "k": 6
+    },
+    {
+      "id": "sum-dl-coverage",
+      "query": "RDK 下载资源汇总页涵盖了哪些产品的资源",
+      "relevantIdentities": [
+        "CHUNK:2526652912898256819:2527400065409097972"
+      ],
+      "k": 6
+    },
+    {
+      "id": "sum-can-intro",
+      "query": "CAN 开发文档开篇是怎么介绍 CAN 总线的",
+      "relevantIdentities": [
+        "CHUNK:2526652878538515263:2527399996689622952"
+      ],
+      "k": 6
+    },
+    {
+      "id": "sum-gpio-samples",
+      "query": "GPIO 文档在哪个目录提供测试例程？总览有哪些",
+      "relevantIdentities": [
+        "CHUNK:2526652844178779132:2527399962329887749"
+      ],
+      "k": 6
+    },
+    {
+      "id": "sum-hw-udisk",
+      "query": "开发板 USB Type A 接口支持 U 盘吗？怎么挂载",
+      "relevantIdentities": [
+        "CHUNK:2526652878538519077:2527399996689627387"
       ],
       "k": 6
     },
