@@ -1,0 +1,278 @@
+{
+  "schemaVersion": "rag-gold.v1",
+  "description": "Live-corpus gold set for the public KB 2526644082445484032 (开源开发文档), snapshot 2026-09-18, current index tasks only (1165 chunks, 6 substantive docs; rdk_doc/MotionSDK are Apache/MIT license texts and intentionally carry no questions but remain retrievable distractors). Annotation rules: relevance judged by READING source chunk text only, never from retrieval output (anti-circular); relevant = the chunk containing the answer-bearing fact; k=6 matches ragRuntime.finalTopK; gold granularity is CHUNK-level — the live runner normalizes returned PARENT identities to their child chunks and KG_QUOTE evidence to its chunk via rag-gold.live-embodied.v1.index.json (same span counts once). empty-scope cases are explicitly typed and scored by emptyScopeCorrectness only. [v1.1 2026-09-18: after the v1.0 main round, a source-side completeness review (reading corpus text only, never retrieval output) added one equally answer-bearing chunk to each of hw-interface-list / imu-read-raw / imu-device-names / can-bitrate-cmd / gpio-hbgpioinfo; v1.0 baseline numbers in records remain reproducible against git history.]",
+  "cases": [
+    {
+      "id": "gpio-interrupt-pins",
+      "query": "RDK Ultra 的 40pin 上哪些管脚可以作为中断管脚使用？BOARD 编码下的编号是多少",
+      "relevantIdentities": [
+        "CHUNK:2526652844178779132:2527399962329887718"
+      ],
+      "k": 6
+    },
+    {
+      "id": "gpio-button-led-demo",
+      "query": "40pin 测试例程里哪个示例程序演示的是一个管脚做按键输入、另一个管脚控制 LED",
+      "relevantIdentities": [
+        "CHUNK:2526652844178779132:2527399962329887750"
+      ],
+      "k": 6
+    },
+    {
+      "id": "gpio-simple-out",
+      "query": "怎么让一个 GPIO 管脚每秒翻转输出电平，实现 LED 循环亮灭？测试代码叫什么",
+      "relevantIdentities": [
+        "CHUNK:2526652844178779132:2527399962329887752"
+      ],
+      "k": 6
+    },
+    {
+      "id": "gpio-encoding-diff",
+      "query": "GPIO 的 BOARD、BCM、CVM、SOC 四种引脚编码方式各是什么含义",
+      "relevantIdentities": [
+        "CHUNK:2526652844178779132:2527399962329887670"
+      ],
+      "k": 6
+    },
+    {
+      "id": "gpio-encoding-set",
+      "query": "如何设置 GPIO 引脚编码模式？编码设置错了想换一种怎么办",
+      "relevantIdentities": [
+        "CHUNK:2526652844178779132:2527399962329887671",
+        "CHUNK:2526652844178779132:2527399962329887672"
+      ],
+      "k": 6
+    },
+    {
+      "id": "gpio-hbgpioinfo",
+      "query": "hb_gpioinfo 命令怎么查看 GPIO 管脚的名称和方向信息",
+      "relevantIdentities": [
+        "CHUNK:2526652844178779132:2527399962329887776",
+        "CHUNK:2526652844178779132:2527399962329887785"
+      ],
+      "k": 6
+    },
+    {
+      "id": "hw-module-core",
+      "query": "RDK X5 核心模组上集成了哪些核心功能单元",
+      "relevantIdentities": [
+        "CHUNK:2526652878538519077:2527399996689627325"
+      ],
+      "k": 6
+    },
+    {
+      "id": "hw-interface-list",
+      "query": "RDK X5 开发板对外提供哪些功能接口",
+      "relevantIdentities": [
+        "CHUNK:2526652878538519077:2527399996689627300",
+        "CHUNK:2526652878538519077:2527399996689627302",
+        "CHUNK:2526652878538519077:2527399996689627303"
+      ],
+      "k": 6
+    },
+    {
+      "id": "hw-usb-count",
+      "query": "RDK X5 有几路 USB 3.0 Type A 接口？工作在什么模式",
+      "relevantIdentities": [
+        "CHUNK:2526652878538519077:2527399996689627375"
+      ],
+      "k": 6
+    },
+    {
+      "id": "hw-power-connector",
+      "query": "开发板使用什么接口供电？供电规格是多少",
+      "relevantIdentities": [
+        "CHUNK:2526652878538519077:2527399996689627314"
+      ],
+      "k": 6
+    },
+    {
+      "id": "hw-fan-position",
+      "query": "风扇接口是开发板上的几号接口",
+      "relevantIdentities": [
+        "CHUNK:2526652878538519077:2527399996689627315"
+      ],
+      "k": 6
+    },
+    {
+      "id": "hw-connector-model",
+      "query": "风扇接口和 CAN 总线接口分别使用什么型号的连接器",
+      "relevantIdentities": [
+        "CHUNK:2526652878538519077:2527399996689627478"
+      ],
+      "k": 6
+    },
+    {
+      "id": "hw-io-level",
+      "query": "IO 电平选择接口可以在哪两档之间切换？会影响哪些接口",
+      "relevantIdentities": [
+        "CHUNK:2526652878538519077:2527399996689627399"
+      ],
+      "k": 6
+    },
+    {
+      "id": "can-protocol-rate",
+      "query": "CAN 总线的最高通信速率和最远通信距离分别是多少",
+      "relevantIdentities": [
+        "CHUNK:2526652878538515263:2527399996689622955"
+      ],
+      "k": 6
+    },
+    {
+      "id": "can-module-cap",
+      "query": "RDK X5 的 CAN 模块支持多高速率的 CAN 和 CAN FD",
+      "relevantIdentities": [
+        "CHUNK:2526652878538515263:2527399996689622969"
+      ],
+      "k": 6
+    },
+    {
+      "id": "can-bitrate-cmd",
+      "query": "怎么用命令把 can0 的波特率设置为 125000",
+      "relevantIdentities": [
+        "CHUNK:2526652878538515263:2527399996689623016",
+        "CHUNK:2526652878538515263:2527399996689623017"
+      ],
+      "k": 6
+    },
+    {
+      "id": "can-utils-intro",
+      "query": "can-utils 是一套什么工具？常用命令有哪些",
+      "relevantIdentities": [
+        "CHUNK:2526652878538515263:2527399996689622979"
+      ],
+      "k": 6
+    },
+    {
+      "id": "can-candump-usage",
+      "query": "candump 命令怎么用？示例是什么",
+      "relevantIdentities": [
+        "CHUNK:2526652878538515263:2527399996689622983",
+        "CHUNK:2526652878538515263:2527399996689622985"
+      ],
+      "k": 6
+    },
+    {
+      "id": "can-cansend-usage",
+      "query": "cansend 发送 CAN 帧的命令格式是什么",
+      "relevantIdentities": [
+        "CHUNK:2526652878538515263:2527399996689622997",
+        "CHUNK:2526652878538515263:2527399996689622999"
+      ],
+      "k": 6
+    },
+    {
+      "id": "imu-what",
+      "query": "ICM42688 是一个什么器件？包含哪些传感器",
+      "relevantIdentities": [
+        "CHUNK:2526652947257992542:2527400065409105017"
+      ],
+      "k": 6
+    },
+    {
+      "id": "imu-read-raw",
+      "query": "怎么读取 ICM42688 的加速度和角速度原始值",
+      "relevantIdentities": [
+        "CHUNK:2526652947257992542:2527400065409105052",
+        "CHUNK:2526652947257992542:2527400065409105053"
+      ],
+      "k": 6
+    },
+    {
+      "id": "imu-device-names",
+      "query": "sysfs 里 ICM42688 陀螺仪和加速度计的设备名分别是什么",
+      "relevantIdentities": [
+        "CHUNK:2526652947257992542:2527400065409105048",
+        "CHUNK:2526652947257992542:2527400065409105050"
+      ],
+      "k": 6
+    },
+    {
+      "id": "dl-image-ubuntu",
+      "query": "RDK 系统镜像 3.0.0 及以上版本基于哪个 Ubuntu 发行版",
+      "relevantIdentities": [
+        "CHUNK:2526652912898256819:2527400065409097979"
+      ],
+      "k": 6
+    },
+    {
+      "id": "dl-image-url",
+      "query": "RDK X5 的系统镜像从哪里下载",
+      "relevantIdentities": [
+        "CHUNK:2526652912898256819:2527400065409097986"
+      ],
+      "k": 6
+    },
+    {
+      "id": "dl-flash-tool",
+      "query": "RDK Module 首次使用建议用什么工具升级系统？怎么查询系统版本",
+      "relevantIdentities": [
+        "CHUNK:2526652912898256819:2527400065409098187"
+      ],
+      "k": 6
+    },
+    {
+      "id": "lite-standup-demo",
+      "query": "Lite3 机器狗站立的 demo 在哪个文件？流程是什么",
+      "relevantIdentities": [
+        "CHUNK:2526652947257993948:2527400099768838285",
+        "CHUNK:2526652947257993948:2527400099768838341"
+      ],
+      "k": 6
+    },
+    {
+      "id": "lite-wifi-freq",
+      "query": "WiFi 通讯延迟波动会影响多高频率的运动控制",
+      "relevantIdentities": [
+        "CHUNK:2526652947257993948:2527400099768838349"
+      ],
+      "k": 6
+    },
+    {
+      "id": "lite-sdk-params",
+      "query": "MotionSDK 关节端提供哪五个控制参数接口",
+      "relevantIdentities": [
+        "CHUNK:2526652947257993948:2527400099768838241"
+      ],
+      "k": 6
+    },
+    {
+      "id": "lite-config-toml",
+      "query": "MotionSDK 的 config.toml 里要配置哪些地址和端口参数",
+      "relevantIdentities": [
+        "CHUNK:2526652947257993948:2527400099768838271"
+      ],
+      "k": 6
+    },
+    {
+      "id": "cross-can-chip",
+      "query": "RDK X5 的 CAN 总线接口采用什么芯片方案？支持 CAN FD 高速接口吗",
+      "relevantIdentities": [
+        "CHUNK:2526652878538519077:2527399996689627311",
+        "CHUNK:2526652878538515263:2527399996689622969"
+      ],
+      "k": 6
+    },
+    {
+      "id": "oos-annual-leave",
+      "query": "公司年假政策是什么时候生效的，有几天",
+      "relevantIdentities": [],
+      "caseType": "EMPTY_SCOPE",
+      "k": 6
+    },
+    {
+      "id": "oos-visa",
+      "query": "如何办理美国旅游签证",
+      "relevantIdentities": [],
+      "caseType": "EMPTY_SCOPE",
+      "k": 6
+    },
+    {
+      "id": "oos-quantum",
+      "query": "量子计算机的基本工作原理是什么",
+      "relevantIdentities": [],
+      "caseType": "EMPTY_SCOPE",
+      "k": 6
+    }
+  ]
+}
