@@ -37,8 +37,11 @@ public interface SuperAgentDocumentMapper extends BaseMapper<SuperAgentDocument>
      * <p>只取 {@code tenant_id} 一列：调用方（索引构建系统上下文）需要的是"这份数据属于哪个租户"，
      * 不是文档内容。语句里没有锁定读，形状对租户拦截器的 SQL 往返安全
      * （对比 {@link #selectActiveForGraphProjection()} 的注意事项）。</p>
+     *
+     * <p>租户权威不随软删消失：删除链路在同一事务先置 status=0 再解析租户写向量墓碑，
+     * 语句不得按 status 过滤，否则所有文档删除都会在墓碑一步失败（见 DocumentTenantLookupSqlTest）。</p>
      */
-    @Select("SELECT tenant_id FROM smartledge_document WHERE id = #{documentId} AND status = 1")
+    @Select("SELECT tenant_id FROM smartledge_document WHERE id = #{documentId}")
     Long selectTenantIdById(@Param("documentId") Long documentId);
 
     /** 批量读取文档租户，只返回 id 与 tenant_id 两列。 */
