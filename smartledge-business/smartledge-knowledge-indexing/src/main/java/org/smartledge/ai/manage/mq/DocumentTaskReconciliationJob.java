@@ -11,6 +11,7 @@ import org.smartledge.ai.manage.mapper.SuperAgentDocumentTaskMapper;
 import org.smartledge.ai.manage.mq.message.DocumentIndexBuildMessage;
 import org.smartledge.ai.manage.mq.message.DocumentParseRouteMessage;
 import org.smartledge.ai.manage.service.DocumentTaskLogService;
+import org.smartledge.ai.manage.support.DocumentTaskInFlightRegistry;
 import org.smartledge.ai.manage.support.RunningTaskHeartbeatPolicy;
 import org.smartledge.enums.DocumentIndexStatusEnum;
 import org.smartledge.enums.DocumentLogLevelEnum;
@@ -51,6 +52,8 @@ public class DocumentTaskReconciliationJob {
     private final DocumentTaskLogService taskLogService;
 
     private final DocumentMessagingProperties properties;
+
+    private final DocumentTaskInFlightRegistry inFlightRegistry;
 
     @Scheduled(fixedDelayString = "${app.manage.messaging.reconcile.interval-millis:60000}",
         initialDelayString = "${app.manage.messaging.reconcile.interval-millis:60000}")
@@ -93,6 +96,12 @@ public class DocumentTaskReconciliationJob {
 
         int count = 0;
         for (SuperAgentDocumentTask task : candidates) {
+            if (inFlightRegistry.isInFlight(task.getId())) {
+                // 任务已被本进程消费、正在执行器排队或执行中：NEW 状态只是还没轮到开工，
+                // 不是消息丢失。不补投、不消耗补投次数（否则排队风暴下任务会被误判失败）。
+                log.debug("任务在途（排队或执行中），跳过补投，documentId={}, taskId={}", task.getDocumentId(), task.getId());
+                continue;
+            }
             if (redispatch(task, config)) {
                 count++;
             }
@@ -164,6 +173,11 @@ public class DocumentTaskReconciliationJob {
 
         int count = 0;
         for (SuperAgentDocumentTask task : candidates) {
+            if (inFlightRegistry.isInFlight(task.getId())) {
+                // 本进程正在执行该任务（长阶段可能没有 GraphRAG checkpoint 心跳），进程活着任务就活着。
+                log.debug("任务在途执行中，跳过失联判定，documentId={}, taskId={}", task.getDocumentId(), task.getId());
+                continue;
+            }
             if (RunningTaskHeartbeatPolicy.hasRecentHeartbeat(task.getExtJson(), nowMillis, staleTimeoutMillis)) {
                 log.info("执行中任务仍有 GraphRAG checkpoint，跳过失联判定，documentId={}, taskId={}, startTime={}, lastCheckpointMillis={}",
                     task.getDocumentId(), task.getId(), task.getStartTime(),

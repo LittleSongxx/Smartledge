@@ -58,6 +58,8 @@ class DocumentTaskReconciliationJobTest {
     @Mock
     private DocumentTaskLogService taskLogService;
 
+    private org.smartledge.ai.manage.support.DocumentTaskInFlightRegistry inFlightRegistry;
+
     private DocumentTaskReconciliationJob job;
 
     private DocumentMessagingProperties properties;
@@ -76,7 +78,9 @@ class DocumentTaskReconciliationJobTest {
         reconcile.setDispatchGraceMillis(1000L);
         reconcile.setStaleTaskTimeoutMillis(1000L);
         properties.setReconcile(reconcile);
-        job = new DocumentTaskReconciliationJob(taskMapper, documentMapper, messagePublisher, taskLogService, properties);
+        inFlightRegistry = new org.smartledge.ai.manage.support.DocumentTaskInFlightRegistry();
+        job = new DocumentTaskReconciliationJob(taskMapper, documentMapper, messagePublisher, taskLogService,
+            properties, inFlightRegistry);
     }
 
     private SuperAgentDocumentTask indexBuildTask(Integer status, Integer retryCount) {
@@ -136,6 +140,36 @@ class DocumentTaskReconciliationJobTest {
         verify(messagePublisher, never()).publishIndexBuild(any());
         verify(taskMapper, times(1)).update(any(), any());
         verify(taskLogService, times(1)).saveLog(anyLong(), anyLong(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("在途任务（已消费、在执行器排队）不补投、不计数、不判失败")
+    void inFlightNewTaskIsNotRedispatchedOrFailed() {
+        SuperAgentDocumentTask task = indexBuildTask(DocumentTaskStatusEnum.NEW.getCode(), 3);
+        stubRedispatchQuery(task);
+        inFlightRegistry.markInFlight(1001L);
+
+        job.reconcile();
+
+        verify(messagePublisher, never()).publishIndexBuild(any());
+        verify(taskMapper, never()).update(any(), any());
+        verify(taskLogService, never()).saveLog(anyLong(), anyLong(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("在途的 RUNNING 任务即使无 checkpoint 心跳也不判失联")
+    void inFlightRunningTaskIsNotMarkedStale() {
+        SuperAgentDocumentTask task = indexBuildTask(DocumentTaskStatusEnum.RUNNING.getCode(), 0);
+        task.setStartTime(new Date(System.currentTimeMillis() - 3 * 3600_000L));
+        task.setExtJson(null);
+        stubStaleQuery(task);
+        inFlightRegistry.markInFlight(1001L);
+
+        job.reconcile();
+
+        verify(taskMapper, never()).update(any(), any());
+        verify(taskLogService, never()).saveLog(anyLong(), anyLong(), any(), any(), any(), any(), any(), any(), any());
+        verify(messagePublisher, never()).publishIndexBuild(any());
     }
 
     @Test

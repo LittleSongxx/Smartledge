@@ -58,6 +58,10 @@ class DocumentAsyncProcessServiceImplDeadLetterTest {
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
 
+    @Spy
+    private org.smartledge.ai.manage.support.DocumentTaskInFlightRegistry taskInFlightRegistry =
+        new org.smartledge.ai.manage.support.DocumentTaskInFlightRegistry();
+
     @InjectMocks
     private DocumentAsyncProcessServiceImpl service;
 
@@ -86,6 +90,20 @@ class DocumentAsyncProcessServiceImplDeadLetterTest {
 
         verify(taskMapper, times(1)).update(any(), any());
         verify(taskLogService, times(1)).saveLog(anyLong(), anyLong(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("在途任务的死信副本不标记失败（任务仍在排队或执行中）")
+    void deadLetterForInFlightTaskIsSkipped() {
+        lenient().when(messagingTopology.indexBuildRoutingKey()).thenReturn("document-index-build");
+        when(taskMapper.selectById(1001L)).thenReturn(task(DocumentTaskStatusEnum.NEW.getCode()));
+        taskInFlightRegistry.markInFlight(1001L);
+
+        service.handleDeadLetter("document-index-build",
+            "{\"documentId\":2001,\"taskId\":1001,\"planId\":3001}");
+
+        verify(taskMapper, never()).update(any(), any());
+        verify(taskLogService, never()).saveLog(anyLong(), anyLong(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test

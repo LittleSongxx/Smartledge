@@ -169,6 +169,8 @@ public class DocumentAsyncProcessServiceImpl implements DocumentAsyncProcessServ
     /** 派生写入的租户权威（S22 批次 2）：租户只来自父文档行，应用层实体没有 tenant_id 字段。 */
     private final DocumentTenantLookup documentTenantLookup;
 
+    private final org.smartledge.ai.manage.support.DocumentTaskInFlightRegistry taskInFlightRegistry;
+
     private final ExecutionFailureDiagnosticProjector failureDiagnosticProjector;
 
     private final ObjectMapper objectMapper;
@@ -192,7 +194,14 @@ public class DocumentAsyncProcessServiceImpl implements DocumentAsyncProcessServ
     public void handleParseRoute(Long documentId, Long taskId) {
         // 消息消费线程不在 Web 请求内，必须显式建立系统租户上下文，
         // 否则租户拦截器会因缺少上下文而拒绝构造查询（fail closed）。
-        TenantContext.runAsSystem(() -> doHandleParseRoute(documentId, taskId));
+        // 在途登记覆盖整个解析执行期：期间对账任务不得把该任务当丢失消息补投或判失联。
+        taskInFlightRegistry.markInFlight(taskId);
+        try {
+            TenantContext.runAsSystem(() -> doHandleParseRoute(documentId, taskId));
+        }
+        finally {
+            taskInFlightRegistry.clear(taskId);
+        }
     }
 
     private void doHandleParseRoute(Long documentId, Long taskId) {
@@ -478,14 +487,39 @@ public class DocumentAsyncProcessServiceImpl implements DocumentAsyncProcessServ
                 documentId, taskId, planId, task.getTaskStatus());
             return;
         }
-
-        indexBuildExecutorService.execute(() -> TenantContext.runAsSystem(() -> doHandleIndexBuild(documentId, taskId, planId)));
+        // 在途登记是幂等去重：对账任务补投的副本消息在这里被拦下，
+        // 不会向执行器重复提交（重复提交会占满队列并触发拒绝异常，最终把在途任务误标失败）。
+        if (!taskInFlightRegistry.markInFlight(taskId)) {
+            log.info("索引构建任务已在途（排队或执行中），跳过重复提交，documentId={}, taskId={}", documentId, taskId);
+            return;
+        }
+        try {
+            indexBuildExecutorService.execute(() -> {
+                try {
+                    TenantContext.runAsSystem(() -> doHandleIndexBuild(documentId, taskId, planId));
+                }
+                finally {
+                    taskInFlightRegistry.clear(taskId);
+                }
+            });
+        }
+        catch (RuntimeException exception) {
+            // 提交失败（如队列打满）时必须撤销登记，否则任务会被永远当作在途而无法被对账补投。
+            taskInFlightRegistry.clear(taskId);
+            throw exception;
+        }
         log.info("索引构建任务已提交后台执行，documentId={}, taskId={}, planId={}", documentId, taskId, planId);
     }
 
     @Override
     public void handleIndexBuild(Long documentId, Long taskId, Long planId) {
-        TenantContext.runAsSystem(() -> doHandleIndexBuild(documentId, taskId, planId));
+        taskInFlightRegistry.markInFlight(taskId);
+        try {
+            TenantContext.runAsSystem(() -> doHandleIndexBuild(documentId, taskId, planId));
+        }
+        finally {
+            taskInFlightRegistry.clear(taskId);
+        }
     }
 
     @Override
@@ -531,6 +565,12 @@ public class DocumentAsyncProcessServiceImpl implements DocumentAsyncProcessServ
         SuperAgentDocumentTask task = taskMapper.selectById(taskId);
         if (task == null) {
             log.error("死信对应的任务不存在，documentId={}, taskId={}", documentId, taskId);
+            return;
+        }
+        if (taskInFlightRegistry.isInFlight(taskId)) {
+            // 死信只说明「一份触发消息副本」投递失败，不代表任务本身失败：
+            // 任务仍在本进程排队或执行中时标失败，会把活任务误杀（2026-09-19 构建风暴实测）。
+            log.warn("死信对应的任务仍在途（排队或执行中），不标记失败，documentId={}, taskId={}", documentId, taskId);
             return;
         }
         if (isTaskFinished(task)) {

@@ -227,11 +227,14 @@ app:
         # 对账任务：补投丢失的触发消息、判定失联任务、释放卡住的文档状态。
         enabled: true
         interval-millis: 60000
-        dispatch-grace-millis: 120000
+        # 补投宽限：解析在 MQ 监听线程串行执行、构建在执行器排队，突发批量上传/构建时
+        # 队列尾部任务会等超过宽限期。宽限 × 补投上限构成长度约 60 分钟的排队容忍窗口，
+        # 在途任务（已消费/已入队）另有登记保护不会被误杀，这里只兜真正的消息丢失。
+        dispatch-grace-millis: 300000
         # 失联静默窗口：无 GraphRAG checkpoint 时从 startTime 起算；有心跳则从最近检查点起算。
         stale-task-timeout-millis: 7200000
         batch-size: 200
-        max-redispatch-attempts: 5
+        max-redispatch-attempts: 12
     pgvector:
       # 是否启用 PGVector 向量写入。
       # 关闭后，向量化链路不会创建 PG 专用数据源。
