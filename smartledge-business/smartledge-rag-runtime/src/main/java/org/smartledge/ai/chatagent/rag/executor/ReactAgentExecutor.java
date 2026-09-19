@@ -16,7 +16,7 @@ import org.smartledge.ai.chatagent.agent.ToolCallOutcome;
 import org.smartledge.ai.rag.runtime.config.ChatAgentProperties;
 import org.smartledge.ai.rag.runtime.model.*;
 import org.smartledge.ai.rag.runtime.port.ChatModelPort;
-import org.smartledge.database.tenant.TenantContext;
+import org.smartledge.database.identity.IdentityContext;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -84,7 +84,7 @@ public class ReactAgentExecutor implements ConversationExecutor {
                     task.debugTrace().getRetrievalNotes().add("当前问题走 ReactAgent 执行路径，由 Agent 自主决定是否调用知识库检索、长期记忆或联网搜索。");
                     stage = task.traceRecorder() == null ? null : task.traceRecorder().startStage(
                         ConversationTraceStageCode.REACT_AGENT, mode().name(), "正在执行 ReAct Agent 推理与工具调用。", null);
-                    state = withTaskTenant(task, () -> states.begin(task.conversationId(), task.exchangeId()));
+                    state = withTaskOperator(task, () -> states.begin(task.conversationId(), task.exchangeId()));
                     List<ChatMessage> history = new ArrayList<>(state.messages());
                     history.add(ChatMessage.text("user", task.executionPlan().getAgentQuestion()));
                     save(state.modelCalls(), state.toolCalls(), history, true);
@@ -137,7 +137,7 @@ public class ReactAgentExecutor implements ConversationExecutor {
             }
             return Flux.fromIterable(calls)
                 .flatMapSequential(call -> Mono.using(() -> new AgentToolContext(task), toolContext ->
-                    Mono.fromCallable(() -> withTaskTenant(task, () -> invoke(call, toolContext)))
+                    Mono.fromCallable(() -> withTaskOperator(task, () -> invoke(call, toolContext)))
                         .subscribeOn(Schedulers.boundedElastic())
                         .timeout(tools.containsKey(call.name()) ? tools.get(call.name()).timeout() : java.time.Duration.ofSeconds(30)),
                     AgentToolContext::cancel, true)
@@ -215,12 +215,12 @@ public class ReactAgentExecutor implements ConversationExecutor {
         }
         void save(int models, int toolCount, List<ChatMessage> history, boolean checkpoint) {
             context.checkActive();
-            state = withTaskTenant(task, () -> states.save(state, models, toolCount, history, checkpoint));
+            state = withTaskOperator(task, () -> states.save(state, models, toolCount, history, checkpoint));
         }
         void close(Throwable error) {
             synchronized (task) {
                 if (!closed.compareAndSet(false, true)) return;
-                try { if (state != null) withTaskTenant(task, () -> { states.finish(state); return null; }); }
+                try { if (state != null) withTaskOperator(task, () -> { states.finish(state); return null; }); }
                 finally {
                     if (task.traceRecorder() != null && stage != null) {
                         if (error == null) task.traceRecorder().completeStage(stage, "ReAct Agent 执行完成。", Map.of(
@@ -246,8 +246,8 @@ public class ReactAgentExecutor implements ConversationExecutor {
         return Math.max(0L, System.currentTimeMillis() - started);
     }
 
-    private static <T> T withTaskTenant(TaskInfo task, TenantAction<T> action) {
-        return TenantContext.callWith(task.tenantId(), () -> {
+    private static <T> T withTaskOperator(TaskInfo task, OperatorAction<T> action) {
+        return IdentityContext.callWith(task.operator(), () -> {
             try {
                 return action.run();
             }
@@ -261,7 +261,7 @@ public class ReactAgentExecutor implements ConversationExecutor {
     }
 
     @FunctionalInterface
-    private interface TenantAction<T> {
+    private interface OperatorAction<T> {
         T run() throws Exception;
     }
 }

@@ -53,6 +53,7 @@ public final class FinalEvidenceSelectionPolicy {
         }
 
         List<EvaluatedCandidate> representatives = deduplicateEligibleCandidates(evaluated, decisions);
+        representatives = filterBelowConfidence(representatives, decisions, plan);
         List<EvaluatedCandidate> selected = selectTopK(representatives, budget);
         Map<Integer, Integer> finalRanks = new LinkedHashMap<>();
         for (int index = 0; index < selected.size(); index++) {
@@ -205,6 +206,34 @@ public final class FinalEvidenceSelectionPolicy {
             }
         }
         return representatives;
+    }
+
+    /**
+     * 最终证据最低置信度过滤：只在 rerank SUCCESS（分数口径为 0-1 相关性分）时生效；
+     * RRF/融合排名分与相关性分量纲不可比，rerank 未启用或失败时跳过，避免误杀。
+     * 全部候选被过滤时返回空列表，上游 RagRetrievalContext.isEmpty() 自然进入无证据回复。
+     */
+    private List<EvaluatedCandidate> filterBelowConfidence(List<EvaluatedCandidate> representatives,
+                                                           Map<Integer, FinalEvidenceDecision> decisions,
+                                                           RetrievalPlan plan) {
+        double minConfidence = plan == null ? 0D : plan.getMinEvidenceConfidence();
+        if (!(minConfidence > 0D) || representatives.isEmpty()) {
+            return representatives;
+        }
+        List<EvaluatedCandidate> confident = new ArrayList<>(representatives.size());
+        for (EvaluatedCandidate candidate : representatives) {
+            boolean rerankScored = candidate.scoreSource() == ScoreSource.RERANK_SCORE
+                && candidate.scoreProvenance() != null
+                && candidate.scoreProvenance().rerankStatus() == RerankStatus.SUCCESS;
+            if (rerankScored && candidate.relevanceScore() < minConfidence) {
+                decisions.put(candidate.inputIndex(),
+                    candidate.decision(Disposition.FILTERED, Reason.FILTERED_BELOW_CONFIDENCE, null));
+            }
+            else {
+                confident.add(candidate);
+            }
+        }
+        return confident;
     }
 
     private List<EvaluatedCandidate> selectTopK(List<EvaluatedCandidate> candidates, int budget) {

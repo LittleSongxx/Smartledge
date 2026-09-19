@@ -24,6 +24,9 @@ public class RetrievalProbeOverrides {
 
     private Boolean rerankEnabled;
 
+    /** 最终证据最低置信度（0-1，rerank 分口径；0=关闭），用于阈值校准实验。 */
+    private Double minEvidenceConfidence;
+
     private List<String> enabledChannels = new ArrayList<>();
 
     /** Explicitly represented so build-time changes fail closed instead of being mistaken for query-time tuning. */

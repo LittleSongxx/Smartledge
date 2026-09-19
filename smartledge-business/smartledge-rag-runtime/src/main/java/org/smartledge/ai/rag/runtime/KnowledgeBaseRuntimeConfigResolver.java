@@ -101,6 +101,7 @@ public class KnowledgeBaseRuntimeConfigResolver {
         mergeField(configs, RuntimeConfig::getChannelTimeoutMs, options::setChannelTimeoutMs, "channelTimeoutMs", conflicts);
         mergeField(configs, RuntimeConfig::getSubQuestionTimeoutMs, options::setSubQuestionTimeoutMs, "subQuestionTimeoutMs", conflicts);
         mergeField(configs, RuntimeConfig::getMinVectorSimilarity, options::setMinVectorSimilarity, "minVectorSimilarity", conflicts);
+        mergeField(configs, RuntimeConfig::getMinEvidenceConfidence, options::setMinEvidenceConfidence, "minEvidenceConfidence", conflicts);
         mergeField(configs, RuntimeConfig::getKeywordRelativeScoreFloor, options::setKeywordRelativeScoreFloor, "keywordRelativeScoreFloor", conflicts);
         mergeField(configs, RuntimeConfig::getKeywordChannelEnabled, options::setKeywordChannelEnabled, "keywordChannelEnabled", conflicts);
         mergeField(configs, RuntimeConfig::getTableChannelEnabled, options::setTableChannelEnabled, "tableChannelEnabled", conflicts);
@@ -246,6 +247,7 @@ public class KnowledgeBaseRuntimeConfigResolver {
         private Long channelTimeoutMs;
         private Long subQuestionTimeoutMs;
         private Double minVectorSimilarity;
+        private Double minEvidenceConfidence;
         private Double keywordRelativeScoreFloor;
         private Boolean keywordChannelEnabled;
         private Boolean tableChannelEnabled;

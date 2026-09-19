@@ -339,6 +339,13 @@ public class DefaultEvaluationExchangeSnapshotProjection implements EvaluationEx
                 false,
                 "KnowledgeBaseRetrievalScopeServiceImpl",
                 "documentMetadataScope"
+            ),
+            storageFilter(
+                valueOrNull(plannedFilters, "documentIdHints"),
+                valueOrNull(projectedFilters, "documentIdHints"),
+                !executedChannels.isEmpty(),
+                "RetrievalExecutionRequest.effectiveDocumentScope",
+                "documentIdHints"
             )
         );
     }

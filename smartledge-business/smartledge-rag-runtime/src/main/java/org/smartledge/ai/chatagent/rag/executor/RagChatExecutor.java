@@ -23,7 +23,7 @@ import org.smartledge.ai.chatagent.service.TaskInfo;
 import org.smartledge.ai.chatagent.support.StreamEventWriter;
 import org.smartledge.ai.rag.runtime.support.DocumentKnowledgeMetadataKeys;
 import org.smartledge.ai.rag.runtime.model.RetrievalDocument;
-import org.smartledge.database.tenant.TenantContext;
+import org.smartledge.database.identity.IdentityContext;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -77,8 +77,8 @@ public class RagChatExecutor implements ConversationExecutor {
                 retrievalPlanSnapshot(plan)
             );
 
-        return Mono.fromCallable(() -> TenantContext.callWith(
-                taskInfo.tenantId(),
+        return Mono.fromCallable(() -> IdentityContext.callWith(
+                taskInfo.operator(),
                 () -> ragRetrievalEngine.retrieve(plan, taskInfo.traceRecorder())
             ))
             .subscribeOn(Schedulers.boundedElastic())

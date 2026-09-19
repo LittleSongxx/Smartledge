@@ -49,7 +49,7 @@ public class TableRetrievalChannel implements RetrievalChannel {
         Map<String, Object> configSnapshot = baseConfigSnapshot(request);
         List<DocumentTableDescriptor> tables;
         try {
-            tables = tableStructureService.listTables(request.documentScope(), request.taskScope());
+            tables = tableStructureService.listTables(request.effectiveDocumentScope(), request.taskScope());
         }
         catch (IllegalArgumentException | IllegalStateException exception) {
             configSnapshot.put("status", "LINEAGE_REJECTED");
@@ -92,7 +92,7 @@ public class TableRetrievalChannel implements RetrievalChannel {
     private Map<String, Object> baseConfigSnapshot(RetrievalExecutionRequest request) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("schemaVersion", "table-retrieval-lineage.v1");
-        snapshot.put("documentIds", request.documentScope());
+        snapshot.put("documentIds", request.effectiveDocumentScope());
         snapshot.put("indexTaskIds", request.taskScope());
         return snapshot;
     }
@@ -109,8 +109,8 @@ public class TableRetrievalChannel implements RetrievalChannel {
             throw new IllegalStateException("table query result violates frozen task lineage");
         }
         boolean scopedPair = false;
-        for (int index = 0; index < request.documentScope().size(); index++) {
-            if (Objects.equals(request.documentScope().get(index), result.getDocumentId())
+        for (int index = 0; index < request.effectiveDocumentScope().size(); index++) {
+            if (Objects.equals(request.effectiveDocumentScope().get(index), result.getDocumentId())
                 && Objects.equals(request.taskScope().get(index), table.getIndexTaskId())) {
                 scopedPair = true;
                 break;
@@ -222,7 +222,7 @@ public class TableRetrievalChannel implements RetrievalChannel {
 
     private Map<Long, KnowledgeDocumentDescriptor> resolveDocumentDescriptors(RetrievalExecutionRequest request) {
         Map<Long, KnowledgeDocumentDescriptor> documentDescriptors = new LinkedHashMap<>();
-        List<Long> documentIds = request.documentScope();
+        List<Long> documentIds = request.effectiveDocumentScope();
         List<KnowledgeDocumentDescriptor> descriptors = documentKnowledgeService
             .listRetrievableDocumentsByKnowledgeBaseIds(request.knowledgeBaseIds());
         for (KnowledgeDocumentDescriptor descriptor : descriptors) {

@@ -19,7 +19,7 @@ public class DocumentRetrieveRequestFactory {
             throw new IllegalArgumentException("RetrievalExecutionRequest is required for document retrieval");
         }
         RetrievalExecutionRequest.ChannelSpec channel = executionRequest.requireChannel(channelName);
-        ScopeHint scopeHint = resolveScopeHint(executionRequest.documentScope(), executionRequest.taskScope());
+        ScopeHint scopeHint = resolveScopeHint(executionRequest.effectiveDocumentScope(), executionRequest.taskScope());
         DocumentRetrieveRequest request = new DocumentRetrieveRequest(
             firstNonBlank(executionRequest.sourceQuestion(), executionRequest.normalizedQuery()),
             executionRequest.executionQuery(),
@@ -29,7 +29,7 @@ public class DocumentRetrieveRequestFactory {
             projectFilters(executionRequest.filters()),
             executionRequest.contextHints()
         );
-        request.setDocumentIds(executionRequest.documentScope());
+        request.setDocumentIds(executionRequest.effectiveDocumentScope());
         request.setTaskIds(executionRequest.taskScope());
         log.info("检索请求构造: originalSubQuestion='{}', retrievalQuery='{}', documentId={}, taskId={}, documentCount={}, sectionHints={}, yearHints={}, queryContextHints={}",
             StrUtil.blankToDefault(executionRequest.sourceQuestion(), "").trim(),

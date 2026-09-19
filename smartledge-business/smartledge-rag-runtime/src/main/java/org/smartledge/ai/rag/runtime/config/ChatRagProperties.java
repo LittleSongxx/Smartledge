@@ -68,6 +68,8 @@ public class ChatRagProperties {
 
     private double keywordRelativeScoreFloor = 0.35D;
 
+    private double minEvidenceConfidence = 0D;
+
     private int parentEvidenceMaxChars = 2200;
 
     private int planningHistoryMaxChars = 1600;
@@ -124,6 +126,7 @@ public class ChatRagProperties {
     public int getFinalTopK() { return managed().finalTopK; }
     public double getMinVectorSimilarity() { return managed().minVectorSimilarity; }
     public double getKeywordRelativeScoreFloor() { return managed().keywordRelativeScoreFloor; }
+    public double getMinEvidenceConfidence() { return managed().minEvidenceConfidence; }
     public int getParentEvidenceMaxChars() { return managed().parentEvidenceMaxChars; }
     public int getPlanningHistoryMaxChars() { return managed().planningHistoryMaxChars; }
     public int getAnswerHistoryMaxChars() { return managed().answerHistoryMaxChars; }

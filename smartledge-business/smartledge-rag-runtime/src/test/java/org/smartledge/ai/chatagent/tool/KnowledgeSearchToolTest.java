@@ -154,7 +154,7 @@ class KnowledgeSearchToolTest {
             "请假",
             ChatQueryMode.OPEN_CHAT,
             "trace",
-            1L,
+            new org.smartledge.database.identity.RequestIdentity(7L, "operator", java.util.Set.of(), java.util.Set.of()),
             null,
             "",
             null,

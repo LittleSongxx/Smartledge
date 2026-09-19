@@ -40,7 +40,8 @@ import org.smartledge.ai.chatagent.service.ConversationTraceRecorder;
 import org.smartledge.ai.rag.runtime.model.KnowledgeDocumentDescriptor;
 import org.smartledge.ai.rag.runtime.port.DocumentEvidencePort;
 import org.smartledge.ai.rag.runtime.support.DocumentKnowledgeMetadataKeys;
-import org.smartledge.database.tenant.TenantContext;
+import org.smartledge.database.identity.IdentityContext;
+import org.smartledge.database.identity.RequestIdentity;
 import org.smartledge.enums.RetrievalChannelEnum;
 import org.smartledge.ai.rag.runtime.model.RetrievalDocument;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -123,10 +124,10 @@ public class RagRetrievalEngine {
         List<RetrievalExecutionRequest> executionRequests = RetrievalExecutionRequest.compile(retrievalPlan);
         validateChannelImplementations(executionRequests);
 
-        // 本方法在调用方的租户作用域内执行（RagChatExecutor 已按本轮任务建立上下文）。
+        // 本方法在调用方的身份作用域内执行（RagChatExecutor 已按本轮任务建立上下文）。
         // 扇出任务由线程池执行、并且可能被 CompletableFuture 的超时机制在别的时间点提交，
-        // 因此显式捕获当前租户并随任务携带，而不是依赖提交线程的上下文。
-        final Long tenantId = TenantContext.get();
+        // 因此显式捕获当前身份并随任务携带，而不是依赖提交线程的上下文。
+        final RequestIdentity identity = IdentityContext.getIdentity();
         RagRetrievalContext context = new RagRetrievalContext();
         context.setRetrievalQuestion(retrievalQuestion);
         context.setUsedChannels(Collections.synchronizedList(new ArrayList<>()));
@@ -147,7 +148,7 @@ public class RagRetrievalEngine {
                     context.getUsedChannels(),
                     context.getRetrievalNotes(),
                     traceRecorder,
-                    tenantId
+                    identity
                 )
                 .orTimeout(resolveSubQuestionTimeoutMs(retrievalPlan), TimeUnit.MILLISECONDS)
                 .exceptionally(throwable -> {
@@ -227,13 +228,13 @@ public class RagRetrievalEngine {
                                                                                    List<String> usedChannels,
                                                                                    List<String> notes,
                                                                                    ConversationTraceRecorder traceRecorder,
-                                                                                   Long tenantId) {
+                                                                                   RequestIdentity identity) {
         int subQuestionIndex = request.subQuestionIndex();
         String subQuestion = request.executionQuery();
 
         List<CompletableFuture<RetrievalChannelResult>> futures = enabledChannelImplementations(request).stream()
             .map(channel -> CompletableFuture.supplyAsync(
-                    () -> TenantContext.callWith(tenantId, () -> channel.retrieve(request)),
+                    () -> IdentityContext.callWith(identity, () -> channel.retrieve(request)),
                     executorService)
                 .orTimeout(resolveChannelTimeoutMs(request, channel.channelName()), TimeUnit.MILLISECONDS)
                 .exceptionally(throwable -> {
@@ -275,7 +276,7 @@ public class RagRetrievalEngine {
         }
 
         return CompletableFuture.allOf(futures.toArray(new CompletableFuture<?>[0]))
-            .thenApplyAsync(ignored -> TenantContext.callWith(tenantId, () -> {
+            .thenApplyAsync(ignored -> IdentityContext.callWith(identity, () -> {
                 List<RetrievalChannelResult> rawChannelResults = futures.stream()
                     .map(CompletableFuture::join)
                     .filter(result -> result.getDocuments() != null)
@@ -371,7 +372,7 @@ public class RagRetrievalEngine {
                         candidateIds(rerankResult.candidates()),
                         finalSourceDocuments.stream()
                             .map(EvidenceIdentityResolver::citationIdentityValue)
-                            .filter(identity -> !identity.isBlank())
+                            .filter(citationIdentity -> !citationIdentity.isBlank())
                             .toList()
                     ),
                     rerankResult.execution(),

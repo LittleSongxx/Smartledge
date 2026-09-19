@@ -1,6 +1,6 @@
 package org.smartledge.ai.chatagent.rag.config;
 
-import org.smartledge.database.tenant.TenantContext;
+import org.smartledge.database.identity.IdentityContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class ChatRagExecutorConfiguration {
 
     /**
-     * 三个线程池都由 {@link TenantContext#propagating(ExecutorService)} 装饰。
+     * 三个线程池都由 {@link IdentityContext#propagating(ExecutorService)} 装饰。
      *
      * <p>租户上下文是 ThreadLocal，任务实际执行的线程与提交线程无关，因此传播只能在
      * 提交点捕获、在任务内恢复。装饰线程池而不是逐个提交点包装：这些池是共享的，
@@ -29,18 +29,18 @@ public class ChatRagExecutorConfiguration {
     @Bean(name = "chatRagExecutorService", destroyMethod = "shutdown")
     public ExecutorService chatRagExecutorService() {
 
-        return TenantContext.propagating(newFixedThreadPool("chat-rag-executor-", 8, 256));
+        return IdentityContext.propagating(newFixedThreadPool("chat-rag-executor-", 8, 256));
     }
 
     @Bean(name = "chatMemorySummaryExecutorService", destroyMethod = "shutdown")
     public ExecutorService chatMemorySummaryExecutorService() {
 
-        return TenantContext.propagating(newFixedThreadPool("chat-memory-summary-", 2, 32));
+        return IdentityContext.propagating(newFixedThreadPool("chat-memory-summary-", 2, 32));
     }
 
     @Bean(name = "chatPostProcessExecutorService", destroyMethod = "shutdown")
     public ExecutorService chatPostProcessExecutorService() {
-        return TenantContext.propagating(newFixedThreadPool("chat-post-process-", 2, 64));
+        return IdentityContext.propagating(newFixedThreadPool("chat-post-process-", 2, 64));
     }
 
     private ExecutorService newFixedThreadPool(String threadNamePrefix, int poolSize, int queueCapacity) {

@@ -7,6 +7,7 @@ import org.smartledge.ai.chatagent.rag.model.RagPromptAssemblyResult;
 import org.smartledge.ai.chatagent.model.SearchReference;
 import org.smartledge.ai.chatagent.support.StreamEventMetadata;
 import org.smartledge.ai.rag.runtime.model.KnowledgeBaseSelectionSnapshot;
+import org.smartledge.database.identity.RequestIdentity;
 import org.smartledge.enums.ChatQueryMode;
 import reactor.core.Disposable;
 import reactor.core.publisher.Sinks;
@@ -36,14 +37,14 @@ public class TaskInfo {
     private final String traceId;
 
     /**
-     * 本次对话执行所属租户。
+     * 发起本轮对话的认证主体快照（可空：系统恢复/对账链路没有主体）。
      *
-     * <p>它是租户上下文在异步链路里的**载体**。{@code TenantContext} 是 ThreadLocal，
+     * <p>它是身份上下文在异步链路里的**载体**。{@code IdentityContext} 是 ThreadLocal，
      * 而对话执行会跨 Reactor {@code boundedElastic}、{@code chat-rag-executor} 线程池
      * 与模型流式回调线程；收尾落库、租约失效停止、客户端取消停止这些终端回调都在请求
-     * 线程返回之后才执行，只有跟着本轮执行走的字段还能拿到当时的租户。</p>
+     * 线程返回之后才执行，只有跟着本轮执行走的字段还能拿到当时的身份。</p>
      */
-    private final Long tenantId;
+    private final RequestIdentity operator;
     private final Long userId;
     private final Long selectedDocumentId;
     private final String selectedDocumentName;
@@ -99,7 +100,7 @@ public class TaskInfo {
                     String question,
                     ChatQueryMode chatMode,
                     String traceId,
-                    Long tenantId,
+                    RequestIdentity operator,
                     Long selectedDocumentId,
                     String selectedDocumentName,
                     Long selectedTaskId,
@@ -117,7 +118,7 @@ public class TaskInfo {
                     List<SearchReference> references,
                     Set<String> usedTools,
                     long startTime) {
-        this(conversationId, exchangeId, question, chatMode, traceId, tenantId, null,
+        this(conversationId, exchangeId, question, chatMode, traceId, operator, null,
             selectedDocumentId, selectedDocumentName, selectedTaskId, knowledgeBaseSelectionSnapshot,
             currentDate, currentDateText, executionPlan, debugTrace, traceRecorder, sink, eventMetadata,
             leaseKey, leaseOwnerToken, thinkingSteps, references, usedTools, startTime);
@@ -128,7 +129,7 @@ public class TaskInfo {
                     String question,
                     ChatQueryMode chatMode,
                     String traceId,
-                    Long tenantId,
+                    RequestIdentity operator,
                     Long userId,
                     Long selectedDocumentId,
                     String selectedDocumentName,
@@ -152,7 +153,7 @@ public class TaskInfo {
         this.question = question;
         this.chatMode = chatMode;
         this.traceId = traceId;
-        this.tenantId = tenantId;
+        this.operator = operator;
         this.userId = userId;
         this.selectedDocumentId = selectedDocumentId;
         this.selectedDocumentName = selectedDocumentName;
@@ -193,8 +194,8 @@ public class TaskInfo {
         return traceId;
     }
 
-    public Long tenantId() {
-        return tenantId;
+    public RequestIdentity operator() {
+        return operator;
     }
 
     public Long userId() {

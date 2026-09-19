@@ -299,7 +299,8 @@ public record EvaluationExchangeSnapshot(
         LayeredValue documentNameHints,
         LayeredValue sectionPathHints,
         LayeredValue yearHints,
-        LayeredValue documentMetadataScope
+        LayeredValue documentMetadataScope,
+        LayeredValue documentIdHints
     ) {
     }
 

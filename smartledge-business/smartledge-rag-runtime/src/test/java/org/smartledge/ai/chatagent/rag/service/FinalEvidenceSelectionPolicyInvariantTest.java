@@ -87,6 +87,48 @@ class FinalEvidenceSelectionPolicyInvariantTest {
             .isEqualTo(51L);
     }
 
+
+    @Test
+    @DisplayName("rerank SUCCESS 且低于 minEvidenceConfidence ⇒ FILTERED_BELOW_CONFIDENCE；全过滤 ⇒ 空")
+    void filtersBelowConfidenceWhenRerankScored() {
+        RetrievalDocument strong = chunk(1L, 11L, 0.9D, FinalEvidenceDecision.RerankStatus.SUCCESS, 0.85D);
+        RetrievalDocument weak = chunk(2L, 22L, 0.8D, FinalEvidenceDecision.RerankStatus.SUCCESS, 0.02D);
+        var result = policy.select(List.of(strong, weak), confidencePlan(2, 0.1D));
+        assertThat(result.selectedDocuments()).hasSize(1);
+        assertThat(result.decisions().stream().filter(decision ->
+            decision.reason() == FinalEvidenceDecision.Reason.FILTERED_BELOW_CONFIDENCE)).hasSize(1);
+
+        var allFiltered = policy.select(List.of(weak), confidencePlan(2, 0.1D));
+        assertThat(allFiltered.selectedDocuments()).isEmpty();
+        assertThat(allFiltered.decisions()).allMatch(decision ->
+            decision.reason() == FinalEvidenceDecision.Reason.FILTERED_BELOW_CONFIDENCE);
+    }
+
+    @Test
+    @DisplayName("rerank 非 SUCCESS（融合分口径）⇒ 阈值跳过不误杀")
+    void confidenceThresholdSkippedWithoutRerankScore() {
+        RetrievalDocument fusionOnly = chunk(1L, 11L, 0.02D, FinalEvidenceDecision.RerankStatus.NOT_REQUESTED, null);
+        var result = policy.select(List.of(fusionOnly), confidencePlan(2, 0.9D));
+        assertThat(result.selectedDocuments()).hasSize(1);
+        assertThat(result.decisions().get(0).disposition()).isEqualTo(FinalEvidenceDecision.Disposition.SELECTED);
+    }
+
+    @Test
+    @DisplayName("minEvidenceConfidence=0（关闭）⇒ 不过滤")
+    void zeroConfidenceDisablesFilter() {
+        RetrievalDocument weak = chunk(1L, 11L, 0.5D, FinalEvidenceDecision.RerankStatus.SUCCESS, 0.01D);
+        var result = policy.select(List.of(weak), confidencePlan(2, 0D));
+        assertThat(result.selectedDocuments()).hasSize(1);
+    }
+
+    private RetrievalPlan confidencePlan(int budget, double minEvidenceConfidence) {
+        return RetrievalPlan.builder()
+            .finalEvidenceBudget(budget)
+            .minEvidenceConfidence(minEvidenceConfidence)
+            .evidenceApplicabilityPlan(null)
+            .build();
+    }
+
     private RetrievalPlan plan(int budget, EvidenceApplicabilityPlan applicability) {
         return RetrievalPlan.builder()
             .finalEvidenceBudget(budget)

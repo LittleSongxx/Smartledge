@@ -10,6 +10,7 @@
   "entities": [],
   "targetEntities": [],
   "excludedEntities": [],
+  "documentScopeSuggestions": [],
   "sectionAnchors": [],
   "answerShape": [],
   "tableOps": [],
@@ -40,6 +41,11 @@ channels 只能从以下值中选择：
 - excludedEntities：当前问题明确要求与目标区分、且不能混入目标结论的排除实体建议。
 - 只有当前原始问题同时明确提到 targetEntities 和 excludedEntities，并且语义确实要求区分二者时，才同时填写这两个字段；不确定时留空。
 
+documentScopeSuggestions 只表达文档范围建议，不直接形成检索过滤：
+- 当当前原始问题明确点名某个产品、机型或文档名称（如具体型号"HI05"、"UM982"，或书名号引用）时，把该名称原样放入建议（≤3 个）。
+- 建议必须是问题文本中出现的字面名称，不得推断、补全或翻译；问题没有点名任何产品/文档时留空。
+- Java RetrievalPlan 会独立验证建议与知识库文档名的唯一匹配后才收窄范围；你填写的只是 advisory suggestion。
+
 answerShape 只能从以下值中选择；可以多选，普通直接问答留空：
 - COMPARE：问题明确要求比较多个对象、条件或维度。
 - LIST：问题明确要求列出多个相关项目，但不要求有序步骤。
@@ -59,7 +65,7 @@ answerShape 只能从以下值中选择；可以多选，普通直接问答留�
 9. confidence 使用 0 到 1 的小数。不确定时低于 0.72。
 10. answerShape 只表达答案组织要求，不重新解释知识范围、检索通道、证据窗口、排序或引用资格；只输出上面的枚举。
 11. 只有问题确实要求多个相关互斥分类时才加入 CATEGORY_TABLE_ROW_COVERAGE；单一分类问题、无关表格行或普通列表不得触发整表枚举。
-12. targetEntities/excludedEntities 是 advisory suggestion。Java RetrievalPlan 会按当前原问题 grounding、NEGATIVE_BOUNDARY 和置信度独立授权；你不能把它们视为 hard filter、最终 route 或证据排除决定。
+12. targetEntities/excludedEntities 是 advisory suggestion。Java RetrievalPlan 会按当前原问题 grounding、NEGATIVE_BOUNDARY 和置信度独立授权；你不能把它们视为 hard filter、最终 route 或证据排除决定。documentScopeSuggestions 同样是 advisory suggestion，Java 侧独立授权后才可能收窄文档范围。
 13. 只返回 JSON，不要 Markdown，不要解释文本。
 
 原始问题：

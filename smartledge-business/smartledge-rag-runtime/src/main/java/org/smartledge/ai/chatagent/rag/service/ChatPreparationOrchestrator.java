@@ -274,6 +274,7 @@ public class ChatPreparationOrchestrator {
             .knowledgeBaseSelectionMode(knowledgeBoundaryResolver.selectionMode(knowledgeBaseSelection))
             .knowledgeBaseIds(knowledgeBoundaryResolver.selectedKnowledgeBaseIds(knowledgeBaseSelection))
             .allowedDocumentIds(knowledgeBoundaryResolver.allowedDocumentIds(knowledgeBaseSelection))
+            .allowedDocumentNames(knowledgeBoundaryResolver.allowedDocumentNames(knowledgeBaseSelection))
             .documentScope(authorizedDocumentIds)
             .taskScope(authorizedTaskIds)
             .knowledgeRoutePlan(route)
@@ -313,6 +314,7 @@ public class ChatPreparationOrchestrator {
         snapshot.put("entities", queryUnderstanding.getEntities() == null ? List.of() : queryUnderstanding.getEntities());
         snapshot.put("targetEntities", queryUnderstanding.getTargetEntities() == null ? List.of() : queryUnderstanding.getTargetEntities());
         snapshot.put("excludedEntities", queryUnderstanding.getExcludedEntities() == null ? List.of() : queryUnderstanding.getExcludedEntities());
+        snapshot.put("documentScopeSuggestions", queryUnderstanding.getDocumentScopeSuggestions() == null ? List.of() : queryUnderstanding.getDocumentScopeSuggestions());
         snapshot.put("sectionAnchors", queryUnderstanding.getSectionAnchors() == null ? List.of() : queryUnderstanding.getSectionAnchors());
         snapshot.put("structureNavigationIntent", buildStructureNavigationIntentTrace(queryUnderstanding.getStructureNavigationIntent()));
         snapshot.put("tableOps", queryUnderstanding.getTableOps() == null ? List.of() : queryUnderstanding.getTableOps());

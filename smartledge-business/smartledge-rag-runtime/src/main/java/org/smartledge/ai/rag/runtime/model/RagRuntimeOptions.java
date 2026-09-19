@@ -44,6 +44,12 @@ public class RagRuntimeOptions {
 
     private double keywordRelativeScoreFloor;
 
+    /**
+     * 最终证据最低置信度（0-1，rerank 相关性分口径；0 = 关闭）。
+     * rerank SUCCESS 时低于该分的候选在最终选择阶段被过滤；全过滤则视为无证据。
+     */
+    private double minEvidenceConfidence;
+
     private boolean keywordChannelEnabled;
 
     private boolean tableChannelEnabled;
@@ -76,6 +82,7 @@ public class RagRuntimeOptions {
             .subQuestionTimeoutMs(40000L)
             .minVectorSimilarity(0.45D)
             .keywordRelativeScoreFloor(0.35D)
+            .minEvidenceConfidence(0D)
             .keywordChannelEnabled(true)
             .tableChannelEnabled(true)
             .graphRagChannelEnabled(true)
@@ -106,6 +113,7 @@ public class RagRuntimeOptions {
             .subQuestionTimeoutMs(properties.getSubQuestionTimeoutMs())
             .minVectorSimilarity(properties.getMinVectorSimilarity())
             .keywordRelativeScoreFloor(properties.getKeywordRelativeScoreFloor())
+            .minEvidenceConfidence(properties.getMinEvidenceConfidence())
             .keywordChannelEnabled(properties.isKeywordChannelEnabled())
             .tableChannelEnabled(properties.isTableChannelEnabled())
             .graphRagChannelEnabled(properties.isGraphRagChannelEnabled())
@@ -143,6 +151,7 @@ public class RagRuntimeOptions {
             .subQuestionTimeoutMs(subQuestionTimeoutMs)
             .minVectorSimilarity(minVectorSimilarity)
             .keywordRelativeScoreFloor(keywordRelativeScoreFloor)
+            .minEvidenceConfidence(minEvidenceConfidence)
             .keywordChannelEnabled(keywordChannelEnabled)
             .tableChannelEnabled(tableChannelEnabled)
             .graphRagChannelEnabled(graphRagChannelEnabled)

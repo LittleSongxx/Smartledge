@@ -32,6 +32,13 @@ public class QueryUnderstandingResult {
     @Builder.Default
     private List<String> excludedEntities = new ArrayList<>();
 
+    /**
+     * 文档范围建议（advisory）：当前原始问题点名的产品/机型/文档名字面名称。
+     * Java RetrievalPlan 独立授权（原问题 grounding + 置信度 + 与文档名唯一匹配）后才收窄范围。
+     */
+    @Builder.Default
+    private List<String> documentScopeSuggestions = new ArrayList<>();
+
     @Builder.Default
     private List<String> sectionAnchors = new ArrayList<>();
 

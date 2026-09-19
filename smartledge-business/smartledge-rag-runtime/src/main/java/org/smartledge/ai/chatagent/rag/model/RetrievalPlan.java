@@ -90,6 +90,9 @@ public class RetrievalPlan {
 
     private int finalEvidenceBudget;
 
+    /** 最终证据最低置信度（rerank 相关性分口径；0=关闭）。 */
+    private double minEvidenceConfidence;
+
     private long subQuestionTimeoutMs;
 
     @Builder.Default

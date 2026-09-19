@@ -43,7 +43,7 @@ public class GraphRagRetrievalChannel implements RetrievalChannel {
         GraphRagSearchRequest graphRequest = new GraphRagSearchRequest(
             request.sourceQuestion(),
             request.executionQuery(),
-            request.documentScope(),
+            request.effectiveDocumentScope(),
             request.taskScope(),
             channel.topK(),
             request.graphIntent().maxHops(),
@@ -207,7 +207,7 @@ public class GraphRagRetrievalChannel implements RetrievalChannel {
 
     private Map<Long, KnowledgeDocumentDescriptor> resolveDocumentDescriptors(RetrievalExecutionRequest request) {
         Map<Long, KnowledgeDocumentDescriptor> documentDescriptors = new LinkedHashMap<>();
-        List<Long> documentIds = request.documentScope();
+        List<Long> documentIds = request.effectiveDocumentScope();
         List<KnowledgeDocumentDescriptor> descriptors = documentKnowledgeService
             .listRetrievableDocumentsByKnowledgeBaseIds(request.knowledgeBaseIds());
         for (KnowledgeDocumentDescriptor descriptor : descriptors) {

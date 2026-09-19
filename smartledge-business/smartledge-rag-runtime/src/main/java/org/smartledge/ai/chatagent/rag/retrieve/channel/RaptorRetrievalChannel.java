@@ -42,7 +42,7 @@ public class RaptorRetrievalChannel implements RetrievalChannel {
         RetrievalExecutionRequest.ChannelSpec channel = request.requireChannel(channelName());
         List<RaptorSearchResult> results = raptorSearchService.search(
             request.executionQuery(),
-            request.documentScope(),
+            request.effectiveDocumentScope(),
             request.taskScope(),
             channel.topK(),
             request.raptorIntent().sourceChunkTopK()
@@ -180,7 +180,7 @@ public class RaptorRetrievalChannel implements RetrievalChannel {
 
     private Map<Long, KnowledgeDocumentDescriptor> resolveDocumentDescriptors(RetrievalExecutionRequest request) {
         Map<Long, KnowledgeDocumentDescriptor> documentDescriptors = new LinkedHashMap<>();
-        List<Long> documentIds = request.documentScope();
+        List<Long> documentIds = request.effectiveDocumentScope();
         List<KnowledgeDocumentDescriptor> descriptors = documentKnowledgeService
             .listRetrievableDocumentsByKnowledgeBaseIds(request.knowledgeBaseIds());
         for (KnowledgeDocumentDescriptor descriptor : descriptors) {

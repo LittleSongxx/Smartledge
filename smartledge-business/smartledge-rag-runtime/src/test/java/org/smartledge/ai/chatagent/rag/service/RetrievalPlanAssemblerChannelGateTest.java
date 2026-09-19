@@ -100,6 +100,88 @@ class RetrievalPlanAssemblerChannelGateTest {
             .orElse(false);
     }
 
+
+    @Test
+    @DisplayName("点名产品 + 四道授权满足 ⇒ documentIdHints 收窄且建议进 documentNameHints 软加权")
+    void groundedProductSuggestionAuthorizesDocumentFocus() {
+        RetrievalPlanAssembler.AssemblyInput input = input(
+            QueryType.DOCUMENT_QA, List.of(), "HI05 的陀螺仪量程是多少");
+        input.setQueryUnderstanding(QueryUnderstandingResult.builder()
+            .queryType(QueryType.DOCUMENT_QA)
+            .channels(List.of())
+            .documentScopeSuggestions(List.of("HI05"))
+            .source("test")
+            .confidence(0.9D)
+            .build());
+        input.setAllowedDocumentNames(java.util.Map.of(1L, "HiPNUC_HI05_产品规格书_中文.pdf", 2L, "HiPNUC_HI32_产品规格书_中文.pdf"));
+        RetrievalPlan plan = assembler.assemble(input);
+        assertThat(plan.getMetadataFilters().getDocumentIdHints()).containsExactly(1L);
+        assertThat(plan.getMetadataFilters().getDocumentNameHints()).contains("HI05");
+        assertThat(plan.getMetadataFilters().getDocumentFocusReason()).contains("uniquely matched");
+        // 授权范围不变：scope 仍是全量 allowed scope，收窄只发生在 effectiveDocumentScope。
+        assertThat(plan.getDocumentScope()).containsExactly(1L, 2L);
+    }
+
+    @Test
+    @DisplayName("建议歧义（匹配多文档）⇒ 不收窄，仅软加权")
+    void ambiguousSuggestionStaysAdvisory() {
+        RetrievalPlanAssembler.AssemblyInput input = input(
+            QueryType.DOCUMENT_QA, List.of(), "HiPNUC 的联系邮箱是什么");
+        input.setQueryUnderstanding(QueryUnderstandingResult.builder()
+            .queryType(QueryType.DOCUMENT_QA)
+            .channels(List.of())
+            .documentScopeSuggestions(List.of("HiPNUC"))
+            .source("test")
+            .confidence(0.9D)
+            .build());
+        input.setAllowedDocumentNames(java.util.Map.of(1L, "HiPNUC_HI05_产品规格书_中文.pdf", 2L, "HiPNUC_HI32_产品规格书_中文.pdf"));
+        RetrievalPlan plan = assembler.assemble(input);
+        assertThat(plan.getMetadataFilters().getDocumentIdHints()).isEmpty();
+        assertThat(plan.getMetadataFilters().getDocumentNameHints()).contains("HiPNUC");
+        assertThat(plan.getMetadataFilters().getDocumentFocusReason()).contains("ambiguous");
+    }
+
+    @Test
+    @DisplayName("建议未在原问题出现（幻觉）或低置信 ⇒ 不授权")
+    void ungroundedOrLowConfidenceSuggestionStaysAdvisory() {
+        RetrievalPlanAssembler.AssemblyInput input = input(
+            QueryType.DOCUMENT_QA, List.of(), "陀螺仪量程是多少");
+        input.setQueryUnderstanding(QueryUnderstandingResult.builder()
+            .queryType(QueryType.DOCUMENT_QA)
+            .channels(List.of())
+            .documentScopeSuggestions(List.of("HI05"))
+            .source("test")
+            .confidence(0.9D)
+            .build());
+        input.setAllowedDocumentNames(java.util.Map.of(1L, "HiPNUC_HI05_产品规格书_中文.pdf", 2L, "HiPNUC_HI32_产品规格书_中文.pdf"));
+        RetrievalPlan plan = assembler.assemble(input);
+        assertThat(plan.getMetadataFilters().getDocumentIdHints()).isEmpty();
+        assertThat(plan.getMetadataFilters().getDocumentFocusReason()).contains("not grounded");
+
+        RetrievalPlanAssembler.AssemblyInput lowConfidence = input(
+            QueryType.DOCUMENT_QA, List.of(), "HI05 的陀螺仪量程是多少");
+        lowConfidence.setQueryUnderstanding(QueryUnderstandingResult.builder()
+            .queryType(QueryType.DOCUMENT_QA)
+            .channels(List.of())
+            .documentScopeSuggestions(List.of("HI05"))
+            .source("test")
+            .confidence(0.5D)
+            .build());
+        lowConfidence.setAllowedDocumentNames(java.util.Map.of(1L, "HiPNUC_HI05_产品规格书_中文.pdf"));
+        RetrievalPlan lowPlan = assembler.assemble(lowConfidence);
+        assertThat(lowPlan.getMetadataFilters().getDocumentIdHints()).isEmpty();
+        assertThat(lowPlan.getMetadataFilters().getDocumentFocusReason()).contains("below the document focus authorization threshold");
+    }
+
+    @Test
+    @DisplayName("文档名归一化：厂商前缀/扩展名/分隔符不影响产品 token 匹配")
+    void documentTokenNormalizationIgnoresVendorSuffixAndSeparators() {
+        assertThat(RetrievalPlanAssembler.normalizeDocumentToken("HiPNUC_HI05_产品规格书_中文.pdf"))
+            .isEqualTo(RetrievalPlanAssembler.normalizeDocumentToken("hipnuc hi05 产品规格书 中文"));
+        assertThat(RetrievalPlanAssembler.normalizeDocumentToken("HI05")).contains("hi05");
+        assertThat(RetrievalPlanAssembler.normalizeDocumentToken("...")).isEmpty();
+    }
+
     private RetrievalPlanAssembler.AssemblyInput input(QueryType queryType,
                                                        List<RetrievalIntent> channels,
                                                        String question) {

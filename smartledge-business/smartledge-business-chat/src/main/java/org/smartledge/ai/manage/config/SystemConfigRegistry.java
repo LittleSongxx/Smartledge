@@ -222,6 +222,9 @@ public class SystemConfigRegistry {
                 percentage("ragRuntime.keywordRelativeScoreFloor", "relevance", "关键词相对分数下限", "关键词候选相对本通道最高分的最低保留比例。",
                         NEW_CONVERSATION, o -> o.getRagRuntime().getKeywordRelativeScoreFloor(),
                         (o, v) -> o.getRagRuntime().setKeywordRelativeScoreFloor((Double) v)),
+                percentage("ragRuntime.minEvidenceConfidence", "relevance", "最终证据最低置信度", "rerank 成功时低于该置信度的候选在最终证据阶段被过滤，全部低于则按无证据处理；0 表示关闭。",
+                        NEW_CONVERSATION, o -> o.getRagRuntime().getMinEvidenceConfidence(),
+                        (o, v) -> o.getRagRuntime().setMinEvidenceConfidence((Double) v)),
 
                 bool("ragRuntime.keywordChannelEnabled", "channels", "启用关键词通道", "决定新会话是否并行执行关键词检索。", NEW_CONVERSATION,
                         o -> o.getRagRuntime().isKeywordChannelEnabled(),
@@ -289,10 +292,10 @@ public class SystemConfigRegistry {
                         "同一用户每分钟允许发起的新问答轮次；Redis 固定窗口计数，超限拒绝。", 1, 10000, "次/分钟",
                         NEW_CONVERSATION, o -> o.getChatRateLimit().getPerMinutePerUser(),
                         (o, v) -> o.getChatRateLimit().setPerMinutePerUser((Integer) v)),
-                integer("chat.rateLimit.concurrentPerTenant", "chatAgent", "租户并发会话上限",
+                integer("chat.rateLimit.concurrentConversations", "chatAgent", "系统并发会话上限",
                         "同一租户允许同时执行的流式问答会话数；Redis 集合计数，超限拒绝。", 1, 1000, "个",
-                        NEW_CONVERSATION, o -> o.getChatRateLimit().getConcurrentPerTenant(),
-                        (o, v) -> o.getChatRateLimit().setConcurrentPerTenant((Integer) v)),
+                        NEW_CONVERSATION, o -> o.getChatRateLimit().getConcurrentConversations(),
+                        (o, v) -> o.getChatRateLimit().setConcurrentConversations((Integer) v)),
 
                 bool("rag.enabled", "ragOrchestration", "启用 RAG 前置编排", "进入最终执行器前执行历史加载、问题改写和文档检索规划。", NEW_CONVERSATION,
                         o -> o.getRag().isEnabled(), (o, v) -> o.getRag().setEnabled((Boolean) v)),

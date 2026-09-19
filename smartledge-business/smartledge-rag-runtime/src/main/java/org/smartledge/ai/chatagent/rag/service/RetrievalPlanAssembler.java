@@ -98,7 +98,7 @@ public class RetrievalPlanAssembler {
             .allowedDocumentScope(copyIds(input.getAllowedDocumentIds()))
             .documentScope(copyIds(input.getDocumentScope()))
             .taskScope(copyIds(input.getTaskScope()))
-            .metadataFilters(buildMetadataFilters(questionPlan.getNormalizedQuery(), understanding))
+            .metadataFilters(buildMetadataFilters(input, questionPlan))
             .evidenceApplicabilityPlan(buildEvidenceApplicabilityPlan(questionPlan.getCurrentQuestion(), understanding))
             .channels(channels)
             .structureNavigation(copyStructureNavigation(understanding == null ? null : understanding.getStructureNavigationIntent()))
@@ -115,6 +115,7 @@ public class RetrievalPlanAssembler {
             .rerankWindow(runtime.getRerankCandidateTopK())
             .rerankRequested(runtime.isRerankEnabled())
             .finalEvidenceBudget(runtime.getFinalTopK())
+            .minEvidenceConfidence(runtime.getMinEvidenceConfidence())
             .subQuestionTimeoutMs(runtime.getSubQuestionTimeoutMs())
             .source("retrieval-plan-assembler")
             .reasons(List.of(
@@ -209,7 +210,9 @@ public class RetrievalPlanAssembler {
         }
     }
 
-    private RetrievalMetadataFilters buildMetadataFilters(String normalizedQuery, QueryUnderstandingResult understanding) {
+    private RetrievalMetadataFilters buildMetadataFilters(AssemblyInput input, RetrievalQuestionPlan questionPlan) {
+        String normalizedQuery = questionPlan.getNormalizedQuery();
+        QueryUnderstandingResult understanding = input.getQueryUnderstanding();
         LinkedHashSet<String> sections = new LinkedHashSet<>();
         LinkedHashSet<String> years = new LinkedHashSet<>();
         if (hasAuthorizedStructureFilter(understanding)) {
@@ -221,12 +224,92 @@ public class RetrievalPlanAssembler {
         LinkedHashSet<String> documentNames = new LinkedHashSet<>();
         collectMatches(DOCUMENT_TITLE_PATTERN, normalizedQuery, documentNames);
         collectMatches(DOCUMENT_FILE_PATTERN, normalizedQuery, documentNames);
+        DocumentFocus documentFocus = buildDocumentFocus(input, questionPlan);
+        // grounded 的产品名建议同时进入 documentNameHints：即使未授权收窄，
+        // ES 的 documentName 软加权（BM25 软加权是 AGENTS.md 明确允许的用法）也能压制同族噪声。
+        documentNames.addAll(documentFocus.groundedSuggestions());
         return RetrievalMetadataFilters.builder()
             .documentNameHints(documentNames.stream().limit(8).toList())
             .sectionPathHints(sections.stream().limit(8).toList())
             .yearHints(years.stream().limit(8).toList())
             .entityHints(normalizeStrings(understanding == null ? null : understanding.getEntities(), 8))
+            .documentIdHints(documentFocus.authorizedDocumentIds())
+            .documentFocusReason(documentFocus.reason())
             .build();
+    }
+
+    /**
+     * 产品级消歧授权：查询理解点名的产品/文档名建议，经四道独立授权后才允许收窄：
+     * AUTO 模式、置信度阈值、原问题 grounding（建议必须是原问题字面子串）、
+     * 与 allowed scope 文档名的归一化唯一匹配（每个建议恰好命中一份文档）。
+     * 任何一条不满足都降级为 advisory（只进软加权，不收窄）。
+     * 与 buildEvidenceApplicabilityPlan 同构：LLM 只建议，Java 独立授权。
+     */
+    private DocumentFocus buildDocumentFocus(AssemblyInput input, RetrievalQuestionPlan questionPlan) {
+        QueryUnderstandingResult understanding = input.getQueryUnderstanding();
+        List<String> suggestions = normalizeStrings(
+            understanding == null ? null : understanding.getDocumentScopeSuggestions(), 3);
+        Map<Long, String> allowedNames = input.getAllowedDocumentNames();
+        if (suggestions.isEmpty()) {
+            return DocumentFocus.advisory(List.of(), "No document scope suggestion from query understanding");
+        }
+        if (input.getChatMode() != ChatQueryMode.AUTO_DOCUMENT) {
+            return DocumentFocus.advisory(suggestions, "Document focus only applies to AUTO_DOCUMENT mode");
+        }
+        if (normalizeConfidence(understanding.getConfidence()) < EVIDENCE_APPLICABILITY_CONFIDENCE_THRESHOLD) {
+            return DocumentFocus.advisory(suggestions, "Query understanding confidence is below the document focus authorization threshold");
+        }
+        if (allowedNames == null || allowedNames.isEmpty()) {
+            return DocumentFocus.advisory(suggestions, "Allowed scope document names are unavailable for matching");
+        }
+        String normalizedQuestion = normalizeEntityGroundingText(questionPlan.getCurrentQuestion());
+        List<String> grounded = suggestions.stream()
+            .filter(suggestion -> normalizedQuestion.contains(normalizeEntityGroundingText(suggestion)))
+            .toList();
+        if (grounded.isEmpty()) {
+            return DocumentFocus.advisory(List.of(), "Document scope suggestions are not grounded in the current original question");
+        }
+        LinkedHashSet<Long> focused = new LinkedHashSet<>();
+        for (String suggestion : grounded) {
+            String token = normalizeDocumentToken(suggestion);
+            if (token.isEmpty()) {
+                return DocumentFocus.advisory(grounded, "Document scope suggestion normalizes to an empty token");
+            }
+            List<Long> matched = allowedNames.entrySet().stream()
+                .filter(entry -> normalizeDocumentToken(entry.getValue()).contains(token))
+                .map(Map.Entry::getKey)
+                .toList();
+            if (matched.size() != 1) {
+                return DocumentFocus.advisory(grounded,
+                    matched.isEmpty()
+                        ? "Document scope suggestion matches no document in the allowed scope"
+                        : "Document scope suggestion is ambiguous across documents in the allowed scope");
+            }
+            focused.add(matched.get(0));
+        }
+        return DocumentFocus.authorized(focused.stream().toList(), grounded,
+            "Current-question grounded product reference uniquely matched allowed-scope documents");
+    }
+
+    /** 文档名/建议的归一化匹配键：小写、去扩展名、去分隔符，仅保留字母数字与 CJK。 */
+    static String normalizeDocumentToken(String value) {
+        if (value == null) {
+            return "";
+        }
+        String lowered = value.toLowerCase().replaceAll("\\.(pdf|md|txt|docx|png|jpg|jpeg|xlsx)$", "");
+        return lowered.replaceAll("[^\\p{IsAlphabetic}\\p{IsDigit}\\u4e00-\\u9fff]", "");
+    }
+
+    /** 产品级消歧的授权结论（authorized ids + grounded 建议 + 原因），随计划可观测。 */
+    record DocumentFocus(List<Long> authorizedDocumentIds, List<String> groundedSuggestions, String reason) {
+
+        static DocumentFocus advisory(List<String> groundedSuggestions, String reason) {
+            return new DocumentFocus(List.of(), groundedSuggestions == null ? List.of() : groundedSuggestions, reason);
+        }
+
+        static DocumentFocus authorized(List<Long> ids, List<String> groundedSuggestions, String reason) {
+            return new DocumentFocus(ids == null ? List.of() : ids, groundedSuggestions, reason);
+        }
     }
 
     private EvidenceApplicabilityPlan buildEvidenceApplicabilityPlan(String currentQuestion,
@@ -694,6 +777,14 @@ public class RetrievalPlanAssembler {
 
         @Builder.Default
         private List<Long> taskScope = new ArrayList<>();
+
+        /**
+         * allowed scope 的文档名快照（id → 文档名），供产品级消歧的归一化唯一匹配。
+         * 由编排层在解析 allowed scope 的同一处填充（同一授权来源，不新增授权）；
+         * 缺省为空 map 时消歧自动降级 advisory，不影响既有行为。
+         */
+        @Builder.Default
+        private Map<Long, String> allowedDocumentNames = new LinkedHashMap<>();
 
         private KnowledgeRoutePlan knowledgeRoutePlan;
 

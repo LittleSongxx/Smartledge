@@ -12,6 +12,8 @@ import org.smartledge.ai.chatagent.rag.service.RagRetrievalEngine;
 import org.smartledge.ai.chatagent.rag.service.RetrievalPlanAssembler;
 import org.smartledge.ai.chatagent.rag.support.EvidenceIdentityResolver;
 import org.smartledge.ai.rag.runtime.model.KnowledgeBaseSelectionSnapshot;
+import org.smartledge.ai.chatagent.rag.model.QueryUnderstandingResult;
+import org.smartledge.ai.chatagent.rag.service.QueryUnderstandingService;
 import org.smartledge.ai.rag.runtime.model.KnowledgeDocumentDescriptor;
 import org.smartledge.ai.rag.runtime.port.KnowledgeScopePort;
 import org.smartledge.enums.ChatQueryMode;
@@ -41,15 +43,18 @@ public class DefaultRetrievalProbeProjection implements RetrievalProbeProjection
     private final RetrievalPlanAssembler planAssembler;
     private final RagRetrievalEngine retrievalEngine;
     private final RetrievalProbeProperties properties;
+    private final QueryUnderstandingService queryUnderstandingService;
 
     public DefaultRetrievalProbeProjection(KnowledgeScopePort scopeService,
                                            RetrievalPlanAssembler planAssembler,
                                            RagRetrievalEngine retrievalEngine,
-                                           RetrievalProbeProperties properties) {
+                                           RetrievalProbeProperties properties,
+                                           QueryUnderstandingService queryUnderstandingService) {
         this.scopeService = scopeService;
         this.planAssembler = planAssembler;
         this.retrievalEngine = retrievalEngine;
         this.properties = properties;
+        this.queryUnderstandingService = queryUnderstandingService;
     }
 
     @Override
@@ -114,9 +119,30 @@ public class DefaultRetrievalProbeProjection implements RetrievalProbeProjection
             .authorizedDocumentIds(documentIds)
             .authorizedTaskIds(taskIds)
             .build();
+        QueryUnderstandingResult understanding = null;
+        if (queryUnderstandingService != null) {
+            // 探针走与主链路相同的查询理解（评测保真）；异常时降级为无理解路径。
+            try {
+                understanding = queryUnderstandingService.understand(query.getQuery(), null, List.of(), null, null);
+            } catch (Exception exception) {
+                understanding = null;
+            }
+        }
+        Map<Long, String> allowedDocumentNames = new LinkedHashMap<>();
+        for (Long documentId : scope.getAllowedDocumentIds()) {
+            allowedDocumentNames.put(documentId, String.valueOf(documentId));
+        }
+        if (allowedDocuments != null) {
+            allowedDocumentNames.clear();
+            for (KnowledgeDocumentDescriptor descriptor : allowedDocuments) {
+                allowedDocumentNames.put(descriptor.getDocumentId(), descriptor.getDocumentName());
+            }
+        }
         RetrievalPlan plan = planAssembler.assemble(RetrievalPlanAssembler.AssemblyInput.builder()
             .chatMode(chatMode)
             .originalQuestion(query.getQuery())
+            .queryUnderstanding(understanding)
+            .allowedDocumentNames(allowedDocumentNames)
             .knowledgeBaseSelectionMode(selectionMode)
             .knowledgeBaseIds(scope.getSelectedKnowledgeBaseIds())
             .allowedDocumentIds(scope.getAllowedDocumentIds())
@@ -171,6 +197,7 @@ public class DefaultRetrievalProbeProjection implements RetrievalProbeProjection
         if (overrides.getRerankCandidateTopK() != null) runtime.setRerankCandidateTopK(overrides.getRerankCandidateTopK());
         if (overrides.getFinalTopK() != null) runtime.setFinalTopK(overrides.getFinalTopK());
         if (overrides.getRerankEnabled() != null) runtime.setRerankEnabled(overrides.getRerankEnabled());
+        if (overrides.getMinEvidenceConfidence() != null) runtime.setMinEvidenceConfidence(overrides.getMinEvidenceConfidence());
         if (overrides.getEnabledChannels() != null && !overrides.getEnabledChannels().isEmpty()) {
             Set<String> channels = canonicalChannels(overrides.getEnabledChannels());
             runtime.setKeywordChannelEnabled(channels.contains(RetrievalChannelEnum.KEYWORD.getName()));
@@ -267,6 +294,7 @@ public class DefaultRetrievalProbeProjection implements RetrievalProbeProjection
         effective.put("rerankCandidateTopK", runtime.getRerankCandidateTopK());
         effective.put("finalTopK", runtime.getFinalTopK());
         effective.put("rerankEnabled", runtime.isRerankEnabled());
+        effective.put("minEvidenceConfidence", runtime.getMinEvidenceConfidence());
         effective.put("enabledChannels", plan.enabledChannelNames());
         effective.put("vectorTopK", runtime.getVectorTopK());
         effective.put("keywordTopK", runtime.getKeywordTopK());

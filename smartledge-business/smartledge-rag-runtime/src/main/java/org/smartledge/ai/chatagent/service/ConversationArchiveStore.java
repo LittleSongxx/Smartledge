@@ -94,7 +94,6 @@ public interface ConversationArchiveStore {
      *
      * <p>文案层不得区分"不存在"与"他租户占用"，但这里必须拒绝创建，避免跨租户碰撞。</p>
      */
-    boolean existsInOtherTenant(String conversationId, Long currentTenantId);
 
     ConversationRemovalResult deleteSession(String conversationId);
 

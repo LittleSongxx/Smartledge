@@ -122,6 +122,7 @@ public record RetrievalExecutionRequest(
         compare(fields, "filters.sectionPathHints", plannedFilters.sectionPathHints(), filters.sectionPathHints());
         compare(fields, "filters.yearHints", plannedFilters.yearHints(), filters.yearHints());
         compare(fields, "filters.entityHints", plannedFilters.entityHints(), filters.entityHints());
+        compare(fields, "filters.documentIdHints", plannedFilters.documentIdHints(), filters.documentIdHints());
         compare(fields, "intent.table", plannedTable, tableIntent);
         compare(fields, "intent.graph", plannedGraph, graphIntent);
         compare(fields, "intent.raptor", plannedRaptor, raptorIntent);
@@ -230,13 +231,15 @@ public record RetrievalExecutionRequest(
         List<String> documentNameHints,
         List<String> sectionPathHints,
         List<String> yearHints,
-        List<String> entityHints
+        List<String> entityHints,
+        List<Long> documentIdHints
     ) {
         public Filters {
             documentNameHints = immutableList(documentNameHints);
             sectionPathHints = immutableList(sectionPathHints);
             yearHints = immutableList(yearHints);
             entityHints = immutableList(entityHints);
+            documentIdHints = immutableList(documentIdHints);
         }
 
         private static Filters from(RetrievalMetadataFilters filters) {
@@ -246,13 +249,27 @@ public record RetrievalExecutionRequest(
                     filters.getDocumentNameHints(),
                     filters.getSectionPathHints(),
                     filters.getYearHints(),
-                    filters.getEntityHints()
+                    filters.getEntityHints(),
+                    filters.getDocumentIdHints()
                 );
         }
 
         private static Filters empty() {
-            return new Filters(List.of(), List.of(), List.of(), List.of());
+            return new Filters(List.of(), List.of(), List.of(), List.of(), List.of());
         }
+    }
+
+    /**
+     * 各通道实际执行的文档范围：授权 documentScope 与已授权 documentIdHints 的交集。
+     * hints 为空（未授权/未点名产品）时即原 scope。存储层继续只消费 documentIds 列表，
+     * 交集在这里一次算清，向量/关键词/表格/图谱/RAPTOR 全通道一致继承。
+     */
+    public List<Long> effectiveDocumentScope() {
+        List<Long> hints = filters == null ? List.of() : filters.documentIdHints();
+        if (hints == null || hints.isEmpty()) {
+            return documentScope;
+        }
+        return documentScope.stream().filter(hints::contains).toList();
     }
 
     public record ChannelSpec(String channelName,

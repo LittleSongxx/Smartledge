@@ -6,7 +6,9 @@ import org.smartledge.ai.rag.runtime.model.KnowledgeDocumentDescriptor;
 import org.smartledge.enums.KnowledgeBaseSelectionMode;
 import org.springframework.stereotype.Service;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * @description: 知识库硬边界纯访问器，从会话选择快照读取执行身份
@@ -56,5 +58,16 @@ public class KnowledgeBoundaryResolver {
         return knowledgeBaseSelection == null || knowledgeBaseSelection.getAllowedTaskIds() == null
             ? List.of()
             : knowledgeBaseSelection.getAllowedTaskIds();
+    }
+
+    /** allowed scope 的文档名快照（产品级消歧的归一化匹配输入，与 allowedDocumentIds 同源）。 */
+    public Map<Long, String> allowedDocumentNames(KnowledgeBaseSelectionSnapshot knowledgeBaseSelection) {
+        Map<Long, String> names = new LinkedHashMap<>();
+        for (KnowledgeDocumentDescriptor descriptor : allowedDocuments(knowledgeBaseSelection)) {
+            if (descriptor.getDocumentId() != null && descriptor.getDocumentName() != null) {
+                names.put(descriptor.getDocumentId(), descriptor.getDocumentName());
+            }
+        }
+        return names;
     }
 }

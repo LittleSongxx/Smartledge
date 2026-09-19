@@ -26,7 +26,6 @@ public final class AgentToolContext {
         ConversationExecutionPlan plan = task.executionPlan();
         return plan == null ? null : plan.getRetrievalPlan();
     }
-    public Long tenantId() { return task.tenantId(); }
     public String conversationId() { return task.conversationId(); }
     public long exchangeId() { return task.exchangeId(); }
     public Long userId() { return task.userId(); }
