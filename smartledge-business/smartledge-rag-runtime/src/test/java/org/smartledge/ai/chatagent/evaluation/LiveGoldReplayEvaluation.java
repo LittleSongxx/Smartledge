@@ -69,11 +69,13 @@ class LiveGoldReplayEvaluation {
         JsonNode index = MAPPER.readTree(openInput(optionalProperty("live.eval.indexPath", null), INDEX_RESOURCE));
         Map<String, List<String>> parents = readParents(index.get("parents"));
         Map<String, String> chunkDoc = readChunkDoc(index.get("chunkDoc"));
+        Map<String, List<String>> summaries = readParents(index.get("summaries"));
+        Map<String, String> kgEvidence = readChunkDoc(index.get("kgEvidence"));
 
         Map<String, List<String>> retrievedByCase = new LinkedHashMap<>();
         for (ReplayableGoldSet.GoldCase goldCase : gold.cases()) {
             List<String> identities = probeOnce(baseUrl, token, experimentPrefix, goldCase, knowledgeBaseId, rerankEnabled);
-            retrievedByCase.put(goldCase.id(), normalizeIdentities(identities, parents, chunkDoc));
+            retrievedByCase.put(goldCase.id(), normalizeIdentities(identities, parents, chunkDoc, summaries, kgEvidence));
             System.out.printf("[live-eval] %-24s -> %d source identities%n", goldCase.id(),
                 retrievedByCase.get(goldCase.id()).size());
             Thread.sleep(intervalMillis);
@@ -94,10 +96,12 @@ class LiveGoldReplayEvaluation {
 
     // ---------- 纯逻辑：identity 归一化（无网络，另有单测锁定） ----------
 
-    /** PARENT 展开为子 CHUNK、KG_QUOTE 折算回 CHUNK，其余原样；去重保序。 */
+    /** PARENT 展开为子 CHUNK、KG_QUOTE 折算回 CHUNK、SUMMARY:RAPTOR 展开为源 CHUNK，其余原样；去重保序。 */
     static List<String> normalizeIdentities(List<String> identities,
                                             Map<String, List<String>> parents,
-                                            Map<String, String> chunkDoc) {
+                                            Map<String, String> chunkDoc,
+                                            Map<String, List<String>> summaries,
+                                            Map<String, String> kgEvidence) {
         LinkedHashSet<String> normalized = new LinkedHashSet<>();
         for (String identity : identities) {
             if (identity == null || identity.isBlank()) {
@@ -112,6 +116,17 @@ class LiveGoldReplayEvaluation {
                 normalized.add(identity);
                 continue;
             }
+            if (identity.startsWith("SUMMARY:RAPTOR:")) {
+                // raptor 通道返回的摘要节点与金标锚定的节点可能层级不同：
+                // 折算到该节点的源 chunk，命中其中任一即视为覆盖同一证据跨度（与 PARENT 同一宽容口径）。
+                List<String> sources = summaries.get(identity);
+                if (sources != null && !sources.isEmpty()) {
+                    normalized.addAll(sources);
+                    continue;
+                }
+                normalized.add(identity);
+                continue;
+            }
             if (identity.startsWith("KG_QUOTE:") && identity.contains(":CHUNK:")) {
                 String chunkId = identity.substring(identity.lastIndexOf(":CHUNK:") + ":CHUNK:".length());
                 String docId = chunkDoc.get(chunkId);
@@ -119,6 +134,19 @@ class LiveGoldReplayEvaluation {
                     normalized.add("CHUNK:" + docId + ":" + chunkId);
                     continue;
                 }
+            }
+            if (identity.startsWith("SUMMARY:KG:")) {
+                // 图谱通道的文档级社区摘要锚定在一条 kg 证据上（communityKey 即证据 id）：
+                // 折算回该证据的源 chunk，与 KG_QUOTE 同一宽容口径。
+                String evidenceId = identity.substring("SUMMARY:KG:".length());
+                String chunkId = kgEvidence.get(evidenceId);
+                String docId = chunkId == null ? null : chunkDoc.get(chunkId);
+                if (docId != null) {
+                    normalized.add("CHUNK:" + docId + ":" + chunkId);
+                    continue;
+                }
+                normalized.add(identity);
+                continue;
             }
             normalized.add(identity);
         }
