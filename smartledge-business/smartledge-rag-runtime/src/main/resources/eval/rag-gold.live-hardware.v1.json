@@ -1,6 +1,6 @@
 {
  "schemaVersion": "rag-gold.v1",
- "description": "具身机器人硬件产品手册库（2529457595262164992）金标 v2，快照 2026-09-19，仅当前索引世代 4334 chunk / 27 文档。分层：sum-doc×5 / sum-chap×6 / sum-corpus×3 / rel-mode×5 / rel-cross×5 / rel-entity×5 / tbl-cell×6 / fact×10 / EMPTY_SCOPE×3。标注规则（防循环偏倚）：相关性只依据阅读源文 chunk/表格/RAPTOR 摘要文本判定，不看任何检索输出；relevant = 含答案事实的证据；同时收录 PARENT（粒度宽容）、SUMMARY:RAPTOR（raptor 通道命中计分）、KG_QUOTE（图谱证据视图）。sum-* 问题答案分散于多章节（单 chunk 无法完整回答），是 RAPTOR 主场；rel-* 依赖实体/关系与跨文档对比，是 GraphRAG 主场；tbl-* 为表格单元格查找；fact 为单 chunk 对照层；EMPTY_SCOPE 为语料外问题（预期高分=过度召回）。图谱抽取器：deepseek-flash（全库统一）。v1.1：索引增加 summaries 映射，runner 归一化新增 SUMMARY:RAPTOR→源 chunk 折算。v1.2（2026-09-19）：sumdoc 四例（md004 例不变）的金标族改为「顶级章节标题 chunk + 主目录顶级行」（按章节号+标题去重，cap 13）——完整答案天然分布在顶级章节族上，单点锚定会低估；迷你目录的子级碎片不进金标（非答案本体）。v1.3：sumdoc 五例再补各文档「概述段落」chunk（如 HI05 的“集 IMU/VRU/AHRS/INS 于一体”段、UM982 文档简介段、md004 定位地图功能总述段）——它们是概述型问题最直接的答案承载者；runner/索引相应支持 SUMMARY:KG 社区摘要与 SUMMARY:RAPTOR 节点到源 chunk 的折算（对图谱/raptor 通道的合法证据形态公平计分）。 v3（2026-09-19 深夜）：新增 20 个『判别性』case，四层各按基线失败机理设计——hop-rel×6（词汇隔离+关系跳转：问句与答案 chunk 无词法重叠，仅实体关系可达，如“能走/不能走”↔“可行驶/不可行驶区域”）；agg×6（聚合要点：答案分散多文档多节，任何单 chunk 只含一角）；struct×4（结构导航：章节族/编号定位）；tblp×4（表格转置/行组合）。词汇隔离度以最长公共子串机械校验并记录于 record。对比基线为 vector+keyword-only 轮。",
+ "description": "具身机器人硬件产品手册库（2529457595262164992）金标 v2，快照 2026-09-19，仅当前索引世代 4334 chunk / 27 文档。分层：sum-doc×5 / sum-chap×6 / sum-corpus×3 / rel-mode×5 / rel-cross×5 / rel-entity×5 / tbl-cell×6 / fact×10 / EMPTY_SCOPE×3。标注规则（防循环偏倚）：相关性只依据阅读源文 chunk/表格/RAPTOR 摘要文本判定，不看任何检索输出；relevant = 含答案事实的证据；同时收录 PARENT（粒度宽容）、SUMMARY:RAPTOR（raptor 通道命中计分）、KG_QUOTE（图谱证据视图）。sum-* 问题答案分散于多章节（单 chunk 无法完整回答），是 RAPTOR 主场；rel-* 依赖实体/关系与跨文档对比，是 GraphRAG 主场；tbl-* 为表格单元格查找；fact 为单 chunk 对照层；EMPTY_SCOPE 为语料外问题（预期高分=过度召回）。图谱抽取器：deepseek-flash（全库统一）。v1.1：索引增加 summaries 映射，runner 归一化新增 SUMMARY:RAPTOR→源 chunk 折算。v1.2（2026-09-19）：sumdoc 四例（md004 例不变）的金标族改为「顶级章节标题 chunk + 主目录顶级行」（按章节号+标题去重，cap 13）——完整答案天然分布在顶级章节族上，单点锚定会低估；迷你目录的子级碎片不进金标（非答案本体）。v1.3：sumdoc 五例再补各文档「概述段落」chunk（如 HI05 的“集 IMU/VRU/AHRS/INS 于一体”段、UM982 文档简介段、md004 定位地图功能总述段）——它们是概述型问题最直接的答案承载者；runner/索引相应支持 SUMMARY:KG 社区摘要与 SUMMARY:RAPTOR 节点到源 chunk 的折算（对图谱/raptor 通道的合法证据形态公平计分）。 v3（2026-09-19 深夜）：新增 20 个『判别性』case，四层各按基线失败机理设计——hop-rel×6（词汇隔离+关系跳转：问句与答案 chunk 无词法重叠，仅实体关系可达，如“能走/不能走”↔“可行驶/不可行驶区域”）；agg×6（聚合要点：答案分散多文档多节，任何单 chunk 只含一角）；struct×4（结构导航：章节族/编号定位）；tblp×4（表格转置/行组合）。词汇隔离度以最长公共子串机械校验并记录于 record。对比基线为 vector+keyword-only 轮。 v3.2（架构级修正，替换作废的 v3.1 逐案补丁方案）：(1) 评分层新增等价类折叠——index.equiv 由『同文档同父块 ∪ 归一化内容相同』机械生成（3764/4334 折叠，357 组内容孪生），金标与检索两侧统一折叠到代表元后比对，对所有 case 无差别生效；runner 归一化新增该步骤并同步金标装载路径，单测 6 项。(2) 标注协议：公司级事实（HiPNUC 联系邮箱，语料 16 处）按协议收全副本。",
  "cases": [
   {
    "id": "sumdoc-hi05",
@@ -409,7 +409,9 @@
    "id": "fact-email",
    "query": "HiPNUC 的销售联系邮箱是什么",
    "relevantIdentities": [
-    "CHUNK:2529457595262164993:2531432180706754439"
+    "CHUNK:2529457595262164993:2531432180706754439",
+    "CHUNK:2529457595262164999:2531432180706751754",
+    "CHUNK:2529457595262165003:2531432180706751409"
    ],
    "k": 6,
    "caseType": "RANKING"

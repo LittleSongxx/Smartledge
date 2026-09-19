@@ -71,11 +71,18 @@ class LiveGoldReplayEvaluation {
         Map<String, String> chunkDoc = readChunkDoc(index.get("chunkDoc"));
         Map<String, List<String>> summaries = readParents(index.get("summaries"));
         Map<String, String> kgEvidence = readChunkDoc(index.get("kgEvidence"));
+        Map<String, String> equiv = readChunkDoc(index.get("equiv"));
 
         Map<String, List<String>> retrievedByCase = new LinkedHashMap<>();
+        List<ReplayableGoldSet.GoldCase> canonicalGoldCases = gold.cases().stream()
+            .map(goldCase -> new ReplayableGoldSet.GoldCase(goldCase.id(), goldCase.query(),
+                normalizeIdentities(goldCase.relevantIdentities(), parents, chunkDoc, summaries, kgEvidence, equiv),
+                goldCase.caseType(), goldCase.k()))
+            .toList();
+        gold = new ReplayableGoldSet(gold.schemaVersion(), gold.description(), canonicalGoldCases);
         for (ReplayableGoldSet.GoldCase goldCase : gold.cases()) {
             List<String> identities = probeOnce(baseUrl, token, experimentPrefix, goldCase, knowledgeBaseId, rerankEnabled);
-            retrievedByCase.put(goldCase.id(), normalizeIdentities(identities, parents, chunkDoc, summaries, kgEvidence));
+            retrievedByCase.put(goldCase.id(), normalizeIdentities(identities, parents, chunkDoc, summaries, kgEvidence, equiv));
             System.out.printf("[live-eval] %-24s -> %d source identities%n", goldCase.id(),
                 retrievedByCase.get(goldCase.id()).size());
             Thread.sleep(intervalMillis);
@@ -101,7 +108,8 @@ class LiveGoldReplayEvaluation {
                                             Map<String, List<String>> parents,
                                             Map<String, String> chunkDoc,
                                             Map<String, List<String>> summaries,
-                                            Map<String, String> kgEvidence) {
+                                            Map<String, String> kgEvidence,
+                                            Map<String, String> equiv) {
         LinkedHashSet<String> normalized = new LinkedHashSet<>();
         for (String identity : identities) {
             if (identity == null || identity.isBlank()) {
@@ -150,7 +158,19 @@ class LiveGoldReplayEvaluation {
             }
             normalized.add(identity);
         }
-        return List.copyOf(normalized);
+        // 等价类折叠：CHUNK 统一映射到代表元（同文档同父块或归一化内容相同的孪生），金标与检索同口径。
+        LinkedHashSet<String> folded = new LinkedHashSet<>();
+        for (String identity : normalized) {
+            if (identity.startsWith("CHUNK:")) {
+                String docId = identity.substring("CHUNK:".length(), identity.indexOf(':', "CHUNK:".length()));
+                String chunkId = identity.substring(identity.lastIndexOf(':') + 1);
+                folded.add("CHUNK:" + docId + ":" + equiv.getOrDefault(chunkId, chunkId));
+            }
+            else {
+                folded.add(identity);
+            }
+        }
+        return List.copyOf(folded);
     }
 
     // ---------- HTTP ----------
