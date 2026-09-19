@@ -22,14 +22,12 @@ class LiveGoldReplayEvaluationNormalizationTest {
         "SUMMARY:RAPTOR:9", List.of("CHUNK:7:100", "CHUNK:7:777"));
     private final Map<String, String> kgEvidence = Map.of(
         "31", "555");
-    private final Map<String, String> equiv = Map.of(
-        "777", "100");
 
     @Test
     @DisplayName("PARENT 展开为子 CHUNK，命中任一子块即等价命中父块跨度")
     void expandsParentToChildChunks() {
         List<String> normalized = LiveGoldReplayEvaluation.normalizeIdentities(
-            List.of("PARENT:7:88", "CHUNK:9:900"), parents, chunkDoc, summaries, kgEvidence, equiv);
+            List.of("PARENT:7:88", "CHUNK:9:900"), parents, chunkDoc, summaries, kgEvidence);
 
         assertThat(normalized).containsExactly("CHUNK:7:100", "CHUNK:7:101", "CHUNK:9:900");
     }
@@ -38,7 +36,7 @@ class LiveGoldReplayEvaluationNormalizationTest {
     @DisplayName("KG_QUOTE 证据折算回其 CHUNK identity")
     void foldsKgQuoteToChunk() {
         List<String> normalized = LiveGoldReplayEvaluation.normalizeIdentities(
-            List.of("KG_QUOTE:31:CHUNK:555"), parents, chunkDoc, summaries, kgEvidence, equiv);
+            List.of("KG_QUOTE:31:CHUNK:555"), parents, chunkDoc, summaries, kgEvidence);
 
         assertThat(normalized).containsExactly("CHUNK:7:555");
     }
@@ -48,7 +46,7 @@ class LiveGoldReplayEvaluationNormalizationTest {
     void keepsUnknownAndDedupsInOrder() {
         List<String> normalized = LiveGoldReplayEvaluation.normalizeIdentities(
             java.util.Arrays.asList("CHUNK:7:100", "PARENT:9:999", "SUMMARY:KG:x", "CHUNK:7:100", null, ""),
-            parents, chunkDoc, summaries, kgEvidence, equiv);
+            parents, chunkDoc, summaries, kgEvidence);
 
         assertThat(normalized).containsExactly("CHUNK:7:100", "PARENT:9:999", "SUMMARY:KG:x");
     }
@@ -57,27 +55,17 @@ class LiveGoldReplayEvaluationNormalizationTest {
     @DisplayName("SUMMARY:RAPTOR 展开为其源 CHUNK（层级不同的摘要节点等价覆盖）")
     void expandsRaptorSummaryToSourceChunks() {
         List<String> normalized = LiveGoldReplayEvaluation.normalizeIdentities(
-            List.of("SUMMARY:RAPTOR:9"), parents, chunkDoc, summaries, kgEvidence, equiv);
+            List.of("SUMMARY:RAPTOR:9"), parents, chunkDoc, summaries, kgEvidence);
 
-        // 777 与 100 是等价类孪生，折叠后合并为代表元 100。
-        assertThat(normalized).containsExactly("CHUNK:7:100");
+        assertThat(normalized).containsExactly("CHUNK:7:100", "CHUNK:7:777");
     }
 
     @Test
     @DisplayName("SUMMARY:KG 社区摘要折算回其锚定证据的 CHUNK")
     void foldsKgCommunitySummaryToChunk() {
         List<String> normalized = LiveGoldReplayEvaluation.normalizeIdentities(
-            List.of("SUMMARY:KG:31"), parents, chunkDoc, summaries, kgEvidence, equiv);
+            List.of("SUMMARY:KG:31"), parents, chunkDoc, summaries, kgEvidence);
 
         assertThat(normalized).containsExactly("CHUNK:7:555");
-    }
-
-    @Test
-    @DisplayName("等价类折叠：孪生 chunk 统一到代表元，金标与检索同口径")
-    void foldsChunkToEquivalenceRepresentative() {
-        List<String> normalized = LiveGoldReplayEvaluation.normalizeIdentities(
-            List.of("CHUNK:7:777", "CHUNK:7:100"), parents, chunkDoc, summaries, kgEvidence, equiv);
-
-        assertThat(normalized).containsExactly("CHUNK:7:100");
     }
 }
