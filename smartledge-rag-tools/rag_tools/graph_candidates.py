@@ -90,9 +90,22 @@ CANDIDATE_SCHEMA = {
         "evidences": {"type": "array", "items": _EVIDENCE_SCHEMA},
     },
 }
-CANDIDATE_RESPONSE_FORMAT = {"type": "json_schema",
-                             "json_schema": {"name": "graph_candidates", "strict": True,
-                                             "schema": CANDIDATE_SCHEMA}}
+# 响应格式按供应商能力选择：默认 json_schema（供应商侧严格约束）；
+# DeepSeek 等 OpenAI 兼容端点不支持 json_schema（HTTP 400 invalid_request_error），
+# 此时用 ragTools.llm.responseFormat=json_object 降级——只约束 JSON 语法，
+# 结构正确性完全交给本地契约（parse + isolate_candidates 逐字段校验后仍按 source_failed 拒绝）。
+_RESPONSE_FORMAT_MODE = config_value("ragTools.llm.responseFormat", "RAG_TOOLS_LLM_RESPONSE_FORMAT",
+                                     "json_schema").strip().lower()
+# 推理型模型的思维链开关：DeepSeek 的 thinking 模型不关推理时会把输出预算全部烧在
+# reasoning_content 上（实测 max_tokens=4096 被 13k 字符思维链耗尽、content 为空）。
+# 默认不发该参数（qwen 等网关不认识多余字段会 400）；deepseek 场景配 disabled。
+_LLM_THINKING_MODE = config_value("ragTools.llm.thinkingMode", "RAG_TOOLS_LLM_THINKING", "").strip().lower()
+if _RESPONSE_FORMAT_MODE == "json_object":
+    CANDIDATE_RESPONSE_FORMAT = {"type": "json_object"}
+else:
+    CANDIDATE_RESPONSE_FORMAT = {"type": "json_schema",
+                                 "json_schema": {"name": "graph_candidates", "strict": True,
+                                                 "schema": CANDIDATE_SCHEMA}}
 # 估算口径里的结构信封占位：只保证"来源预算"一侧的口径与既有基线一致，不代表真实请求。
 _STRUCTURAL_ENVELOPE = {"type": "json_object"}
 
@@ -180,9 +193,12 @@ def messages(prompt, segments, options):
 
 def request_body(prompt, segments, public):
     """抽取请求体的唯一构造点：真实调用与估算都从这里取形状。"""
-    return {"model": public["model"], "temperature": 0, "max_tokens": public["outputReserve"],
+    body = {"model": public["model"], "temperature": 0, "max_tokens": public["outputReserve"],
             "response_format": CANDIDATE_RESPONSE_FORMAT,
             "messages": messages(prompt, segments, public["options"])}
+    if _LLM_THINKING_MODE in ("disabled", "enabled"):
+        body["thinking"] = {"type": _LLM_THINKING_MODE}
+    return body
 
 
 def prompt_tokens(prompt, segments, public):

@@ -540,6 +540,22 @@ class GraphExtractTest(unittest.TestCase):
         # thinking 保持开启：请求里不得出现任何关闭它的开关。
         self.assertFalse({'enable_thinking', 'thinking', 'chat_template_kwargs'} & set(body))
 
+    def test_extraction_request_json_object_downgrade_disables_thinking(self):
+        """RT12：DeepSeek 等 OpenAI 兼容端点不支持 json_schema（400），推理模型的思维链
+        还会烧空输出预算（实测 4096 全耗在 reasoning_content、content 为空）。
+        降级模式 = json_object + thinking disabled；结构正确性交给本地契约。"""
+        import rag_tools.graph_candidates as gc
+        with patch.object(gc, 'CANDIDATE_RESPONSE_FORMAT', {'type': 'json_object'}), \
+             patch.object(gc, '_LLM_THINKING_MODE', 'disabled'):
+            request = self.request(['Alice visits Lab.'])
+            plan = extract_graph(request).metadata
+            with patch('urllib.request.urlopen',
+                       return_value=self.response(dict(entities=[], relations=[], evidences=[]))) as http:
+                extract_graph(self.batch_request(request, plan, plan['batches'][0]))
+        body = json.loads(http.call_args.args[0].data)
+        self.assertEqual(body['response_format'], {'type': 'json_object'})
+        self.assertEqual(body['thinking'], {'type': 'disabled'})
+
     def test_empty_is_complete_but_truncation_and_malformed_fail_unknown_candidate_source_is_rejected(self):
         request = self.request(['甲调用乙。'])
         plan = extract_graph(request).metadata
