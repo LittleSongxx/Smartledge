@@ -19,16 +19,6 @@
 </p>
 
 <p align="center">
-  在线体验
-  ·
-  <a href="https://smartledge.cn/login">用户端</a>
-  ·
-  <a href="https://smartledge.cn/admin/login">管理端</a>
-  <br/>
-  登录页自带作品集试用账号（只读）
-</p>
-
-<p align="center">
   <img src="docs/assets/screenshots/chat.png" alt="Smartledge 对话台：回答带显式引用" width="100%" />
 </p>
 
@@ -36,7 +26,7 @@
 
 **Smartledge 是一套多租户企业知识库问答。** 主线只有一件事：在用户选好的知识范围内检索真实文档，再给出能点开核对的答案。它不靠模型“看起来像引用”，回答里的 `[n]` 只能指向这一轮真正交给模型的来源。
 
-Java 拥有整条业务主链路（范围、检索计划、通道、证据、引用、归档）；Python 只做解析、向量、重排、图谱与层次树这些算法活；Vue 是对话台和管理台。所有演示截图都来自当前前端对接线上实例的真实页面。
+Java 拥有整条业务主链路（范围、检索计划、通道、证据、引用、归档）；Python 只做解析、向量、重排、图谱与层次树这些算法活；Vue 是对话台和管理台。
 
 ---
 
@@ -173,7 +163,7 @@ java -jar smartledge-business/smartledge-business-chat/target/smartledge-busines
 cd vue && npm install && npm run dev    # http://127.0.0.1:5174
 ```
 
-本地种子账号：`admin` / `admin123456`（管理）、`alice` / `user123456`（对话）。线上试用走 [用户端](https://smartledge.cn/login) 的 guest、[管理端](https://smartledge.cn/admin/login) 的 reviewer。
+本地种子账号：`admin` / `admin123456`（管理）、`alice` / `user123456`（对话）。
 
 更完整的单机部署步骤见 [deploy/server/README.md](deploy/server/README.md)。
 
